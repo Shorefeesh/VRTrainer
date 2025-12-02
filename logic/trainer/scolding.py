@@ -96,9 +96,6 @@ class ScoldingFeature:
         elif level == "hard":
             self._shock_strength = 40
             self._cooldown_seconds = 2.0
-        else:  # "normal" or unknown
-            self._shock_strength = 30
-            self._cooldown_seconds = 3.0
 
     def _worker_loop(self) -> None:
         """Background loop that watches Whisper transcripts."""

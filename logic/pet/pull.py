@@ -36,6 +36,9 @@ class PullFeature:
         self._cooldown_seconds: float = 2.0
         self._cooldown_until: float = 0.0
 
+        self._shock_strength_min: float = 20.0
+        self._shock_strength_max: float = 40.0
+
         # Parameter base names for ears and tail.
         self._targets = ("LeftEar", "RightEar", "Tail")
 
@@ -86,8 +89,8 @@ class PullFeature:
     def _check_and_maybe_shock(self, now: float) -> bool:
         """Return True if a shock was sent based on current parameters."""
         for base in self._targets:
-            is_grabbed = self._get_bool_param(f"{base}_IsGrabbed")
-            stretch = self._get_float_param(f"{base}_Stretch")
+            is_grabbed = self.osc.get_bool_param(f"{base}_IsGrabbed")
+            stretch = self.osc.get_float_param(f"{base}_Stretch")
 
             if is_grabbed and stretch >= self._stretch_threshold:
                 self._deliver_correction(base, stretch)
@@ -95,53 +98,13 @@ class PullFeature:
 
         return False
 
-    def _get_bool_param(self, name: str) -> bool:
-        """Interpret an OSC parameter as a boolean."""
-        raw = self.osc.get_parameter(name)
-        if raw is None:
-            return False
-
-        if isinstance(raw, bool):
-            return raw
-        if isinstance(raw, (int, float)):
-            return raw != 0
-        if isinstance(raw, str):
-            lowered = raw.strip().lower()
-            if lowered in {"1", "true", "yes", "on"}:
-                return True
-            if lowered in {"0", "false", "no", "off"}:
-                return False
-        return bool(raw)
-
-    def _get_float_param(self, name: str) -> float:
-        """Interpret an OSC parameter as a float in the 0–1 range."""
-        raw = self.osc.get_parameter(name)
-        if raw is None:
-            return 0.0
-
-        if isinstance(raw, bool):
-            value = 1.0 if raw else 0.0
-        elif isinstance(raw, (int, float)):
-            value = float(raw)
-        elif isinstance(raw, str):
-            try:
-                value = float(raw.strip())
-            except ValueError:
-                return 0.0
-        else:
-            return 0.0
-
-        # Clamp to [0, 1] as documented for stretch parameters.
-        return max(0.0, min(1.0, value))
-
-    def _deliver_correction(self, target: str, stretch: float) -> None:
+    def _deliver_correction(self, stretch: float) -> None:
         """Trigger a corrective shock via PiShock."""
         try:
             # Scale intensity slightly with stretch so gentle pulls are
             # milder than extreme ones.
-            base_strength = 20
-            extra = int((stretch - self._stretch_threshold) * 80)
-            strength = max(10, min(100, base_strength + extra))
+            scale = (stretch - self._stretch_threshold) / (1 - self._stretch_threshold)
+            strength = max(self._shock_strength_min, min(self._shock_strength_max, scale * self._shock_strength_max))
 
             self.pishock.send_shock(strength=strength, duration=0.5)
         except Exception:

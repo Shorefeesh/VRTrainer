@@ -43,6 +43,7 @@ class PronounsFeature:
         # one chunk.
         self._cooldown_seconds = 5.0
         self._cooldown_until: float = 0.0
+        self._shock_strength: float = 20.0
 
         # Disallowed first-person pronoun tokens. Tokens are compared
         # in a case-insensitive, punctuation-stripped fashion.
@@ -145,7 +146,7 @@ class PronounsFeature:
             # Use a modest default intensity and short pulse so that
             # this feature is usable out of the box without further
             # tuning. Values can be adjusted later or made configurable.
-            self.pishock.send_shock(strength=25, duration=0.5)
+            self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
         except Exception:
             # Never let PiShock errors break the feature loop.
             return

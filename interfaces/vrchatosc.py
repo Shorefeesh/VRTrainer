@@ -22,8 +22,10 @@ class VRChatOSCInterface:
         self._lock = threading.Lock()
         self._message_times = deque()
         self._trainer_params_seen: set[str] = set()
-        self._expected_trainer_params: set[str] = self._load_expected_trainer_params(Path(__file__).resolve())
-        # Ear/tail pull parameters used by the pet pull feature.
+        self._expected_trainer_params:  set[str] = {
+            "Trainer/Proximity",
+            "Trainer/Focus",
+        }
         self._expected_pet_pull_params: set[str] = {
             "LeftEar_IsGrabbed",
             "LeftEar_Stretch",
@@ -36,27 +38,6 @@ class VRChatOSCInterface:
 
         self._server = None
         self._thread = None
-
-    @staticmethod
-    def _load_expected_trainer_params(current_file: "Path") -> set[str]:
-        """Load expected Trainer/<param> names from avatar/trainer.md if present."""
-        from pathlib import Path
-
-        root = current_file.parents[1]
-        avatar_file = root / "avatar" / "trainer.md"
-        if not avatar_file.exists():
-            return set()
-
-        expected: set[str] = set()
-        content = avatar_file.read_text(encoding="utf-8")
-        for line in content.splitlines():
-            stripped = line.strip()
-            if not stripped or stripped.startswith("#"):
-                continue
-            for token in stripped.split():
-                if token.startswith("Trainer/"):
-                    expected.add(token)
-        return expected
 
     def start(self) -> None:
         """Start OSC handling and begin listening on localhost:9001."""
@@ -173,3 +154,42 @@ class VRChatOSCInterface:
         """
         with self._lock:
             return self._param_values.get(name, default)
+
+    def get_bool_param(self, name: str, default: object | None = None) -> bool:
+        """Interpret an OSC parameter as a boolean."""
+        raw = self.get_parameter(name, default)
+        if raw is None:
+            return False
+
+        if isinstance(raw, bool):
+            return raw
+        if isinstance(raw, (int, float)):
+            return raw != 0
+        if isinstance(raw, str):
+            lowered = raw.strip().lower()
+            if lowered in {"1", "true", "yes", "on"}:
+                return True
+            if lowered in {"0", "false", "no", "off"}:
+                return False
+        return bool(raw)
+
+    def get_float_param(self, name: str, default: object | None = None) -> float:
+        """Interpret an OSC parameter as a float in the 0–1 range."""
+        raw = self.get_parameter(name, default)
+        if raw is None:
+            return 0.0
+
+        if isinstance(raw, bool):
+            value = 1.0 if raw else 0.0
+        elif isinstance(raw, (int, float)):
+            value = float(raw)
+        elif isinstance(raw, str):
+            try:
+                value = float(raw.strip())
+            except ValueError:
+                return 0.0
+        else:
+            return 0.0
+
+        # Clamp to [0, 1] as documented for stretch parameters.
+        return max(0.0, min(1.0, value))
