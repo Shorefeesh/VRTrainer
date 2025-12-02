@@ -76,3 +76,77 @@ class StatusIndicator(ttk.Frame):
     def set_status(self, text: str, colour: str = "grey") -> None:
         self._status_var.set(text)
         self._value_label.configure(foreground=colour)
+
+
+def create_pishock_credentials_frame(
+    master,
+    *,
+    frame_text: str = "PiShock credentials",
+) -> tuple[ttk.LabelFrame, LabeledEntry, LabeledEntry]:
+    """Create a PiShock credential section shared by Trainer/Pet tabs."""
+    frame = ttk.LabelFrame(master, text=frame_text)
+    frame.columnconfigure(0, weight=1)
+
+    username = LabeledEntry(frame, "Username")
+    username.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+
+    api_key = LabeledEntry(frame, "API key", show="*")
+    api_key.grid(row=1, column=0, sticky="ew")
+
+    return frame, username, api_key
+
+
+def create_features_frame(
+    master,
+    labels: list[str],
+    *,
+    frame_text: str = "Features",
+) -> tuple[ttk.LabelFrame, list[LabeledCheckbutton]]:
+    """Create a simple features frame with one checkbox per label."""
+    frame = ttk.LabelFrame(master, text=frame_text)
+
+    features: list[LabeledCheckbutton] = []
+    for row, label in enumerate(labels):
+        feature = LabeledCheckbutton(frame, label)
+        feature.grid(row=row, column=0, sticky="w")
+        features.append(feature)
+
+    return frame, features
+
+
+def create_running_status_frame(
+    master,
+    *,
+    frame_text: str = "Running status",
+) -> tuple[ttk.LabelFrame, StatusIndicator, StatusIndicator, StatusIndicator, tk.Text, StatusIndicator]:
+    """Create the shared running status section (OSC, PiShock, Whisper, log, active features)."""
+    status_frame = ttk.LabelFrame(master, text=frame_text)
+    status_frame.columnconfigure(0, weight=1)
+
+    # VRChat OSC
+    osc_status = StatusIndicator(status_frame, "VRChat OSC")
+    osc_status.grid(row=0, column=0, sticky="w", padx=6, pady=(4, 0))
+
+    # PiShock
+    pishock_status = StatusIndicator(status_frame, "PiShock")
+    pishock_status.grid(row=1, column=0, sticky="w", padx=6, pady=(2, 0))
+
+    # Whisper
+    whisper_frame = ttk.Frame(status_frame)
+    whisper_frame.grid(row=2, column=0, sticky="nsew", padx=6, pady=(4, 0))
+    whisper_frame.columnconfigure(0, weight=1)
+
+    whisper_status = StatusIndicator(whisper_frame, "Whisper")
+    whisper_status.grid(row=0, column=0, sticky="w")
+
+    log_label = ttk.Label(whisper_frame, text="Text log:")
+    log_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+    whisper_log = tk.Text(whisper_frame, height=6, wrap="word", state="disabled")
+    whisper_log.grid(row=2, column=0, sticky="nsew", pady=(2, 4))
+
+    # Active features
+    active_features_status = StatusIndicator(status_frame, "Active features")
+    active_features_status.grid(row=3, column=0, sticky="w", padx=6, pady=(2, 6))
+
+    return status_frame, osc_status, pishock_status, whisper_status, whisper_log, active_features_status

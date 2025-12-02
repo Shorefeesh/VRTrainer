@@ -1,7 +1,14 @@
 import tkinter as tk
 from tkinter import ttk
 
-from .shared import LabeledEntry, LabeledCheckbutton, StatusIndicator
+from .shared import (
+    LabeledEntry,
+    LabeledCheckbutton,
+    StatusIndicator,
+    create_features_frame,
+    create_pishock_credentials_frame,
+    create_running_status_frame,
+)
 
 
 class PetTab(ttk.Frame):
@@ -21,25 +28,14 @@ class PetTab(ttk.Frame):
             self.columnconfigure(col, weight=1)
 
     def _build_pishock_section(self) -> None:
-        frame = ttk.LabelFrame(self, text="PiShock credentials")
+        frame, self.pishock_username, self.pishock_api_key = create_pishock_credentials_frame(self)
         frame.grid(row=0, column=0, sticky="nsew", padx=12, pady=12)
-        frame.columnconfigure(0, weight=1)
-
-        self.pishock_username = LabeledEntry(frame, "Username")
-        self.pishock_username.grid(row=0, column=0, sticky="ew", pady=(0, 4))
-
-        self.pishock_api_key = LabeledEntry(frame, "API key", show="*")
-        self.pishock_api_key.grid(row=1, column=0, sticky="ew")
 
     def _build_features_section(self) -> None:
-        frame = ttk.LabelFrame(self, text="Features")
+        frame, features = create_features_frame(self, ["Ear/Tail pull", "Pronouns"])
         frame.grid(row=0, column=1, sticky="nsew", padx=12, pady=12)
 
-        self.feature_ear_tail = LabeledCheckbutton(frame, "Ear/Tail pull")
-        self.feature_pronouns = LabeledCheckbutton(frame, "Pronouns")
-
-        self.feature_ear_tail.grid(row=0, column=0, sticky="w")
-        self.feature_pronouns.grid(row=1, column=0, sticky="w")
+        self.feature_ear_tail, self.feature_pronouns = features
 
     def _build_controls_section(self) -> None:
         control_frame = ttk.Frame(self)
@@ -49,35 +45,16 @@ class PetTab(ttk.Frame):
         self.start_button = ttk.Button(control_frame, text="Start", command=self._toggle_start)
         self.start_button.grid(row=0, column=0, sticky="w")
 
-        status_frame = ttk.LabelFrame(control_frame, text="Running status")
+        (
+            status_frame,
+            self.osc_status,
+            self.pishock_status,
+            self.whisper_status,
+            self.whisper_log,
+            self.active_features_status,
+        ) = create_running_status_frame(control_frame)
+
         status_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
-        status_frame.columnconfigure(0, weight=1)
-
-        # VRChat OSC
-        self.osc_status = StatusIndicator(status_frame, "VRChat OSC")
-        self.osc_status.grid(row=0, column=0, sticky="w", padx=6, pady=(4, 0))
-
-        # PiShock
-        self.pishock_status = StatusIndicator(status_frame, "PiShock")
-        self.pishock_status.grid(row=1, column=0, sticky="w", padx=6, pady=(2, 0))
-
-        # Whisper
-        whisper_frame = ttk.Frame(status_frame)
-        whisper_frame.grid(row=2, column=0, sticky="nsew", padx=6, pady=(4, 0))
-        whisper_frame.columnconfigure(0, weight=1)
-
-        self.whisper_status = StatusIndicator(whisper_frame, "Whisper")
-        self.whisper_status.grid(row=0, column=0, sticky="w")
-
-        log_label = ttk.Label(whisper_frame, text="Text log:")
-        log_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
-
-        self.whisper_log = tk.Text(whisper_frame, height=6, wrap="word", state="disabled")
-        self.whisper_log.grid(row=2, column=0, sticky="nsew", pady=(2, 4))
-
-        # Active features
-        self.active_features_status = StatusIndicator(status_frame, "Active features")
-        self.active_features_status.grid(row=3, column=0, sticky="w", padx=6, pady=(2, 6))
 
     # Public helpers -----------------------------------------------------
     def collect_settings(self) -> dict:

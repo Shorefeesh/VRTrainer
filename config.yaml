@@ -1,5 +1,5 @@
 settings:
-  input_device: null
+  input_device: 'Headset (WH-1000XM5 Hands-Free '
 trainer:
   active_profile: Kyt
   profiles:

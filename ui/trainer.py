@@ -1,7 +1,15 @@
 import tkinter as tk
 from tkinter import ttk, simpledialog, messagebox
 
-from .shared import LabeledEntry, LabeledCheckbutton, LabeledCombobox, StatusIndicator
+from .shared import (
+    LabeledEntry,
+    LabeledCheckbutton,
+    LabeledCombobox,
+    StatusIndicator,
+    create_features_frame,
+    create_pishock_credentials_frame,
+    create_running_status_frame,
+)
 
 
 class TrainerTab(ttk.Frame):
@@ -149,42 +157,25 @@ class TrainerTab(ttk.Frame):
 
     # PiShock credentials ------------------------------------------------
     def _build_pishock_section(self) -> None:
-        frame = ttk.LabelFrame(self, text="PiShock credentials")
+        frame, self.pishock_username, self.pishock_api_key = create_pishock_credentials_frame(self)
         frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=6)
-        frame.columnconfigure(0, weight=1)
         self._detail_frames.append(frame)
-
-        self.pishock_username = LabeledEntry(frame, "Username")
-        self.pishock_username.grid(row=0, column=0, sticky="ew", pady=(0, 4))
-
-        self.pishock_api_key = LabeledEntry(frame, "API key", show="*")
-        self.pishock_api_key.grid(row=1, column=0, sticky="ew")
 
         self.pishock_username.variable.trace_add("write", self._on_any_setting_changed)
         self.pishock_api_key.variable.trace_add("write", self._on_any_setting_changed)
 
     # Feature toggles ----------------------------------------------------
     def _build_features_section(self) -> None:
-        frame = ttk.LabelFrame(self, text="Features")
+        frame, features = create_features_frame(
+            self,
+            ["Focus", "Proximity", "Tricks", "Scolding"],
+        )
         frame.grid(row=1, column=1, sticky="nsew", padx=12, pady=6)
         self._detail_frames.append(frame)
 
-        self.feature_focus = LabeledCheckbutton(frame, "Focus")
-        self.feature_proximity = LabeledCheckbutton(frame, "Proximity")
-        self.feature_tricks = LabeledCheckbutton(frame, "Tricks")
-        self.feature_scolding = LabeledCheckbutton(frame, "Scolding")
+        self.feature_focus, self.feature_proximity, self.feature_tricks, self.feature_scolding = features
 
-        self.feature_focus.grid(row=0, column=0, sticky="w")
-        self.feature_proximity.grid(row=1, column=0, sticky="w")
-        self.feature_tricks.grid(row=2, column=0, sticky="w")
-        self.feature_scolding.grid(row=3, column=0, sticky="w")
-
-        for feature in (
-            self.feature_focus,
-            self.feature_proximity,
-            self.feature_tricks,
-            self.feature_scolding,
-        ):
+        for feature in features:
             feature.variable.trace_add("write", self._on_any_setting_changed)
 
     # Difficulty ---------------------------------------------------------
@@ -209,35 +200,16 @@ class TrainerTab(ttk.Frame):
         self.start_button = ttk.Button(control_frame, text="Start", command=self._toggle_start)
         self.start_button.grid(row=0, column=0, sticky="w")
 
-        status_frame = ttk.LabelFrame(control_frame, text="Running status")
+        (
+            status_frame,
+            self.osc_status,
+            self.pishock_status,
+            self.whisper_status,
+            self.whisper_log,
+            self.active_features_status,
+        ) = create_running_status_frame(control_frame)
+
         status_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
-        status_frame.columnconfigure(0, weight=1)
-
-        # VRChat OSC
-        self.osc_status = StatusIndicator(status_frame, "VRChat OSC")
-        self.osc_status.grid(row=0, column=0, sticky="w", padx=6, pady=(4, 0))
-
-        # PiShock
-        self.pishock_status = StatusIndicator(status_frame, "PiShock")
-        self.pishock_status.grid(row=1, column=0, sticky="w", padx=6, pady=(2, 0))
-
-        # Whisper
-        whisper_frame = ttk.Frame(status_frame)
-        whisper_frame.grid(row=2, column=0, sticky="nsew", padx=6, pady=(4, 0))
-        whisper_frame.columnconfigure(0, weight=1)
-
-        self.whisper_status = StatusIndicator(whisper_frame, "Whisper")
-        self.whisper_status.grid(row=0, column=0, sticky="w")
-
-        log_label = ttk.Label(whisper_frame, text="Text log:")
-        log_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
-
-        self.whisper_log = tk.Text(whisper_frame, height=6, wrap="word", state="disabled")
-        self.whisper_log.grid(row=2, column=0, sticky="nsew", pady=(2, 4))
-
-        # Active features
-        self.active_features_status = StatusIndicator(status_frame, "Active features")
-        self.active_features_status.grid(row=3, column=0, sticky="w", padx=6, pady=(2, 6))
 
     # Public helpers -----------------------------------------------------
     def collect_settings(self) -> dict:

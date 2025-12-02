@@ -2,6 +2,7 @@ import tkinter as tk
 from tkinter import ttk, font
 
 from config import load_config, save_config
+from interfaces.audio_devices import list_input_devices
 from logic import services
 from logic.trainer import profile as trainer_profile
 
@@ -36,10 +37,19 @@ def build_ui(root: tk.Tk) -> None:
 
     settings_tab = SettingsTab(notebook, on_settings_change=on_settings_changed)
 
-    # Restore settings from config.
+    # Populate available input devices.
+    devices = list_input_devices()
+    settings_tab.set_input_devices(devices)
+
+    # Restore settings from config, preferring a stored device if present.
     settings_conf = config.get("settings") or {}
-    if settings_conf.get("input_device"):
-        settings_tab.input_device_row.variable.set(settings_conf["input_device"])
+    stored_device = settings_conf.get("input_device")
+    if stored_device:
+        # If the stored device is not in the current list (e.g. unplugged),
+        # still show it so the user can see what was last used.
+        if stored_device not in devices:
+            settings_tab.set_input_devices(devices + [stored_device])
+        settings_tab.input_device_row.variable.set(stored_device)
 
     # Trainer tab --------------------------------------------------------
     def on_trainer_settings_changed(settings: dict) -> None:
@@ -119,6 +129,7 @@ def build_ui(root: tk.Tk) -> None:
     notebook.pack(fill="both", expand=True)
 
     def _refresh_osc_status() -> None:
+        # OSC diagnostics
         trainer_status = services.get_trainer_osc_status()
         if trainer_status is not None:
             trainer_tab.update_osc_status(trainer_status)
@@ -126,6 +137,18 @@ def build_ui(root: tk.Tk) -> None:
         pet_status = services.get_pet_osc_status()
         if pet_status is not None:
             pet_tab.update_osc_status(pet_status)
+
+        # Whisper transcript log
+        trainer_whisper_text = services.get_trainer_whisper_log_text()
+        if trainer_whisper_text:
+            trainer_tab.append_whisper_log(trainer_whisper_text)
+
+        pet_whisper_text = services.get_pet_whisper_log_text()
+        if pet_whisper_text:
+            pet_tab.whisper_log.configure(state="normal")
+            pet_tab.whisper_log.insert("end", pet_whisper_text + "\n")
+            pet_tab.whisper_log.see("end")
+            pet_tab.whisper_log.configure(state="disabled")
 
         root.after(1000, _refresh_osc_status)
 

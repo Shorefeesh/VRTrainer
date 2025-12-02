@@ -192,3 +192,25 @@ def get_pet_osc_status() -> Optional[Dict[str, Any]]:
     if runtime is None:
         return None
     return runtime.osc.get_status_snapshot()
+
+
+def get_trainer_whisper_log_text() -> str:
+    """Return new Whisper transcript text for the trainer UI log.
+
+    Uses a dedicated tag so UI logging does not interfere with
+    feature-specific transcript consumption.
+    """
+    runtime = _trainer_runtime
+    if runtime is None:
+        return ""
+
+    return runtime.whisper.get_new_text("trainer_ui_log")
+
+
+def get_pet_whisper_log_text() -> str:
+    """Return new Whisper transcript text for the pet UI log."""
+    runtime = _pet_runtime
+    if runtime is None:
+        return ""
+
+    return runtime.whisper.get_new_text("pet_ui_log")
