@@ -111,6 +111,10 @@ def build_ui(root: tk.Tk) -> None:
 
     # Pet tab ------------------------------------------------------------
 
+    def on_pet_settings_changed(settings: dict) -> None:
+        config["pet"] = dict(settings)
+        save_config(config)
+
     def on_pet_start(running: bool) -> None:
         """Callback for when the Pet tab Start/Stop button is toggled."""
         if running:
@@ -120,7 +124,12 @@ def build_ui(root: tk.Tk) -> None:
         else:
             services.stop_pet()
 
-    pet_tab = PetTab(notebook, on_start=on_pet_start)
+    pet_tab = PetTab(notebook, on_settings_change=on_pet_settings_changed, on_start=on_pet_start)
+
+    # Restore pet settings from config, if any.
+    pet_settings_conf = config.get("pet") or {}
+    if pet_settings_conf:
+        pet_tab.apply_settings(pet_settings_conf)
 
     notebook.add(settings_tab, text="settings")
     notebook.add(trainer_tab, text="trainer")

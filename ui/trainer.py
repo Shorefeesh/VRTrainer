@@ -6,13 +6,14 @@ from .shared import (
     LabeledCheckbutton,
     LabeledCombobox,
     StatusIndicator,
+    ScrollableFrame,
     create_features_frame,
     create_pishock_credentials_frame,
     create_running_status_frame,
 )
 
 
-class TrainerTab(ttk.Frame):
+class TrainerTab(ScrollableFrame):
     """Trainer tab UI."""
 
     def __init__(
@@ -39,17 +40,18 @@ class TrainerTab(ttk.Frame):
         self._build_profile_section()
         self._build_pishock_section()
         self._build_features_section()
+        self._build_word_lists_section()
         self._build_difficulty_section()
         self._build_controls_section()
 
         for col in range(2):
-            self.columnconfigure(col, weight=1)
+            self.container.columnconfigure(col, weight=1)
 
         self._update_profile_visibility()
 
     # Profile management -------------------------------------------------
     def _build_profile_section(self) -> None:
-        frame = ttk.LabelFrame(self, text="Profile")
+        frame = ttk.LabelFrame(self.container, text="Profile")
         frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 6))
         frame.columnconfigure(0, weight=1)
 
@@ -157,8 +159,8 @@ class TrainerTab(ttk.Frame):
 
     # PiShock credentials ------------------------------------------------
     def _build_pishock_section(self) -> None:
-        frame, self.pishock_username, self.pishock_api_key = create_pishock_credentials_frame(self)
-        frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=6)
+        frame, self.pishock_username, self.pishock_api_key = create_pishock_credentials_frame(self.container)
+        frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
         self._detail_frames.append(frame)
 
         self.pishock_username.variable.trace_add("write", self._on_any_setting_changed)
@@ -167,10 +169,10 @@ class TrainerTab(ttk.Frame):
     # Feature toggles ----------------------------------------------------
     def _build_features_section(self) -> None:
         frame, features = create_features_frame(
-            self,
+            self.container,
             ["Focus", "Proximity", "Tricks", "Scolding"],
         )
-        frame.grid(row=1, column=1, sticky="nsew", padx=12, pady=6)
+        frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
         self._detail_frames.append(frame)
 
         self.feature_focus, self.feature_proximity, self.feature_tricks, self.feature_scolding = features
@@ -178,10 +180,50 @@ class TrainerTab(ttk.Frame):
         for feature in features:
             feature.variable.trace_add("write", self._on_any_setting_changed)
 
+    # Word lists ---------------------------------------------------------
+    def _build_word_lists_section(self) -> None:
+        frame = ttk.LabelFrame(self.container, text="Word lists")
+        frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
+        self._detail_frames.append(frame)
+
+        # Names ----------------------------------------------------------
+        names_label = ttk.Label(frame, text="Names (one per line)")
+        names_label.grid(row=0, column=0, sticky="w")
+
+        names_text_frame = ttk.Frame(frame)
+        names_text_frame.grid(row=1, column=0, sticky="nsew", pady=(2, 6))
+        names_text_frame.columnconfigure(0, weight=1)
+
+        self.names_text = tk.Text(names_text_frame, height=6, wrap="word")
+        names_scroll = ttk.Scrollbar(names_text_frame, orient="vertical", command=self.names_text.yview)
+        self.names_text.configure(yscrollcommand=names_scroll.set)
+
+        self.names_text.grid(row=0, column=0, sticky="nsew")
+        names_scroll.grid(row=0, column=1, sticky="ns")
+        self.names_text.bind("<FocusOut>", self._on_any_setting_changed)
+
+        # Scolding words -------------------------------------------------
+        scolding_label = ttk.Label(frame, text="Scolding words (one per line)")
+        scolding_label.grid(row=0, column=1, sticky="w")
+
+        scolding_text_frame = ttk.Frame(frame)
+        scolding_text_frame.grid(row=1, column=1, sticky="nsew", pady=(2, 6))
+        scolding_text_frame.columnconfigure(0, weight=1)
+
+        self.scolding_words_text = tk.Text(scolding_text_frame, height=6, wrap="word")
+        scolding_scroll = ttk.Scrollbar(scolding_text_frame, orient="vertical", command=self.scolding_words_text.yview)
+        self.scolding_words_text.configure(yscrollcommand=scolding_scroll.set)
+
+        self.scolding_words_text.grid(row=0, column=0, sticky="nsew")
+        scolding_scroll.grid(row=0, column=1, sticky="ns")
+        self.scolding_words_text.bind("<FocusOut>", self._on_any_setting_changed)
+
     # Difficulty ---------------------------------------------------------
     def _build_difficulty_section(self) -> None:
-        frame = ttk.LabelFrame(self, text="Difficulty")
-        frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=6)
+        frame = ttk.LabelFrame(self.container, text="Difficulty")
+        frame.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
         frame.columnconfigure(0, weight=1)
         self._detail_frames.append(frame)
 
@@ -192,8 +234,8 @@ class TrainerTab(ttk.Frame):
 
     # Controls + status --------------------------------------------------
     def _build_controls_section(self) -> None:
-        control_frame = ttk.Frame(self)
-        control_frame.grid(row=2, column=1, sticky="nsew", padx=12, pady=6)
+        control_frame = ttk.Frame(self.container)
+        control_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
         control_frame.columnconfigure(0, weight=1)
         self._detail_frames.append(control_frame)
 
@@ -223,6 +265,9 @@ class TrainerTab(ttk.Frame):
             "feature_tricks": self.feature_tricks.variable.get(),
             "feature_scolding": self.feature_scolding.variable.get(),
             "difficulty": self.difficulty_row.variable.get(),
+            "names": self._get_words_from_text(self.names_text),
+            "command_words": [],
+            "scolding_words": self._get_words_from_text(self.scolding_words_text),
         }
 
     def apply_profile_settings(self, settings: dict | None) -> None:
@@ -238,6 +283,8 @@ class TrainerTab(ttk.Frame):
                 self.feature_tricks.variable.set(False)
                 self.feature_scolding.variable.set(False)
                 self.difficulty_row.variable.set("Normal")
+                self._set_words_text(self.names_text, [])
+                self._set_words_text(self.scolding_words_text, [])
             else:
                 # Profile name may come from config; keep UI combobox in sync.
                 profile_name = settings.get("profile")
@@ -251,6 +298,8 @@ class TrainerTab(ttk.Frame):
                 self.feature_tricks.variable.set(bool(settings.get("feature_tricks")))
                 self.feature_scolding.variable.set(bool(settings.get("feature_scolding")))
                 self.difficulty_row.variable.set(settings.get("difficulty") or "Normal")
+                self._set_words_text(self.names_text, settings.get("names", []))
+                self._set_words_text(self.scolding_words_text, settings.get("scolding_words", []))
         finally:
             self._suppress_callbacks = False
 
@@ -317,6 +366,25 @@ class TrainerTab(ttk.Frame):
         self.whisper_log.insert("end", text + "\n")
         self.whisper_log.see("end")
         self.whisper_log.configure(state="disabled")
+
+    # Internal helpers ---------------------------------------------------
+    def _get_words_from_text(self, widget: tk.Text) -> list[str]:
+        """Return a cleaned list of words from a Text widget."""
+        raw = widget.get("1.0", "end").strip()
+        if not raw:
+            return []
+        # Treat each non-empty line as a separate word/phrase.
+        return [line.strip() for line in raw.splitlines() if line.strip()]
+
+    def _set_words_text(self, widget: tk.Text, words) -> None:
+        """Populate a Text widget from a stored list or string."""
+        widget.delete("1.0", "end")
+        if not words:
+            return
+        if isinstance(words, str):
+            widget.insert("1.0", words)
+        else:
+            widget.insert("1.0", "\n".join(str(w) for w in words))
 
     # Internal callbacks -------------------------------------------------
     def _on_any_setting_changed(self, *_) -> None:

@@ -13,6 +13,9 @@ TRAINER_SETTINGS_KEYS = [
     "feature_tricks",
     "feature_scolding",
     "difficulty",
+    "names",
+    "command_words",
+    "scolding_words",
 ]
 
 
@@ -53,6 +56,9 @@ def default_profile_settings(profile_name: str) -> Dict[str, Any]:
         "feature_tricks": False,
         "feature_scolding": False,
         "difficulty": "Normal",
+        "names": [],
+        "command_words": [],
+        "scolding_words": [],
     }
 
 
@@ -121,4 +127,3 @@ def delete_profile(config: Dict[str, Any], name: str) -> bool:
         trainer["active_profile"] = None
 
     return True
-

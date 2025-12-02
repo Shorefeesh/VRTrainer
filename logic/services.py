@@ -66,7 +66,15 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
         features.append(TricksFeature(osc=osc, pishock=pishock, whisper=whisper))
 
     if trainer_settings.get("feature_scolding"):
-        features.append(ScoldingFeature(osc=osc, pishock=pishock, whisper=whisper))
+        features.append(
+            ScoldingFeature(
+                osc=osc,
+                pishock=pishock,
+                whisper=whisper,
+                scolding_words=trainer_settings.get("scolding_words") or [],
+                difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+            )
+        )
 
     for feature in features:
         if hasattr(feature, "start"):

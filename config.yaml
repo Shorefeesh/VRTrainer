@@ -1,5 +1,5 @@
 settings:
-  input_device: 'Headset (WH-1000XM5 Hands-Free '
+  input_device: Microsoft Sound Mapper - Input
 trainer:
   active_profile: Kyt
   profiles:
@@ -10,6 +10,35 @@ trainer:
       feature_focus: true
       feature_proximity: true
       feature_tricks: true
+      feature_scolding: true
+      difficulty: Normal
+      names:
+      - Kit
+      - Kitsune
+      - Umbreon
+      - Pet
+      command_words: []
+      scolding_words:
+      - Bad boy
+      - Bad girl
+      - Bad dog
+      - Bad fox
+      - Bad Umbreon
+      - Shock
+    a:
+      profile: a
+      pishock_username: ''
+      pishock_api_key: ''
+      feature_focus: false
+      feature_proximity: false
+      feature_tricks: true
       feature_scolding: false
       difficulty: Normal
-pet: {}
+      names: []
+      command_words: []
+      scolding_words: []
+pet:
+  pishock_username: ''
+  pishock_api_key: ''
+  feature_ear_tail: true
+  feature_pronouns: true

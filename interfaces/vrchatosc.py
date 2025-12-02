@@ -23,6 +23,16 @@ class VRChatOSCInterface:
         self._message_times = deque()
         self._trainer_params_seen: set[str] = set()
         self._expected_trainer_params: set[str] = self._load_expected_trainer_params(Path(__file__).resolve())
+        # Ear/tail pull parameters used by the pet pull feature.
+        self._expected_pet_pull_params: set[str] = {
+            "LeftEar_IsGrabbed",
+            "LeftEar_Stretch",
+            "RightEar_IsGrabbed",
+            "RightEar_Stretch",
+            "Tail_IsGrabbed",
+            "Tail_Stretch",
+        }
+        self._param_values: dict[str, object] = {}
 
         self._server = None
         self._thread = None
@@ -56,11 +66,9 @@ class VRChatOSCInterface:
         try:
             from pythonosc.dispatcher import Dispatcher
             from pythonosc.osc_server import ThreadingOSCUDPServer
-        except ImportError as exc:
-            raise RuntimeError(
-                "The 'python-osc' package is required for VRChat OSC. "
-                "Install it with `pip install python-osc`."
-            ) from exc
+        except Exception:
+            self._running = False
+            return
 
         import threading
 
@@ -91,7 +99,7 @@ class VRChatOSCInterface:
         self._thread = None
 
     # Internal helpers -------------------------------------------------
-    def _on_osc_message(self, address: str, *_) -> None:
+    def _on_osc_message(self, address: str, *values: object) -> None:
         """Default handler for all incoming OSC messages."""
         import time
 
@@ -102,6 +110,12 @@ class VRChatOSCInterface:
             self._message_times.append(now)
             while self._message_times and self._message_times[0] < cutoff:
                 self._message_times.popleft()
+
+            prefix_all = "/avatar/parameters/"
+            if address.startswith(prefix_all):
+                param_name = address[len(prefix_all) :]
+                value = values[0] if values else None
+                self._param_values[param_name] = value
 
             prefix = "/avatar/parameters/Trainer/"
             if address.startswith(prefix):
@@ -121,19 +135,41 @@ class VRChatOSCInterface:
                 self._message_times.popleft()
             messages_last_10s = len(self._message_times)
 
-            expected = set(self._expected_trainer_params)
-            seen = set(self._trainer_params_seen)
+            expected_trainer = set(self._expected_trainer_params)
+            seen_trainer = set(self._trainer_params_seen)
 
-        found = len(expected & seen)
-        missing = sorted(expected - seen)
+            # Pet ear/tail pull parameters are tracked via the generic
+            # parameter store; treat known pull params as "expected" and
+            # mark whichever have been observed so far as "found".
+            expected_pet = set(self._expected_pet_pull_params)
+            seen_pet = {name for name in self._param_values.keys() if name in expected_pet}
+
+        found_trainer = len(expected_trainer & seen_trainer)
+        missing_trainer = sorted(expected_trainer - seen_trainer)
+
+        found_pet = len(seen_pet)
+        missing_pet = sorted(expected_pet - seen_pet)
 
         return {
             "messages_last_10s": messages_last_10s,
-            "expected_trainer_params_total": len(expected),
-            "found_trainer_params": found,
-            "missing_trainer_params": missing,
+            "expected_trainer_params_total": len(expected_trainer),
+            "found_trainer_params": found_trainer,
+            "missing_trainer_params": missing_trainer,
+            "expected_pet_pull_params_total": len(expected_pet),
+            "found_pet_pull_params": found_pet,
+            "missing_pet_pull_params": missing_pet,
         }
 
     @property
     def is_running(self) -> bool:
         return self._running
+
+    # Parameter access -------------------------------------------------
+    def get_parameter(self, name: str, default: object | None = None) -> object | None:
+        """Return the most recent value for the given avatar parameter.
+
+        The ``name`` should be the suffix after ``/avatar/parameters/``,
+        for example ``\"LeftEar_IsGrabbed\"`` or ``\"Tail_Stretch\"``.
+        """
+        with self._lock:
+            return self._param_values.get(name, default)

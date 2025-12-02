@@ -78,6 +78,33 @@ class StatusIndicator(ttk.Frame):
         self._value_label.configure(foreground=colour)
 
 
+class ScrollableFrame(ttk.Frame):
+    """A frame with a vertical scrollbar that appears when content is taller than the available space."""
+
+    def __init__(self, master, **kwargs) -> None:
+        super().__init__(master, **kwargs)
+
+        self._canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        self._v_scrollbar = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
+        self.container = ttk.Frame(self._canvas)
+
+        # Keep scroll region and width in sync with content.
+        self._canvas_window = self._canvas.create_window((0, 0), window=self.container, anchor="nw")
+        self.container.bind(
+            "<Configure>",
+            lambda event: self._canvas.configure(scrollregion=self._canvas.bbox("all")),
+        )
+        self._canvas.bind(
+            "<Configure>",
+            lambda event: self._canvas.itemconfigure(self._canvas_window, width=event.width),
+        )
+
+        self._canvas.configure(yscrollcommand=self._v_scrollbar.set)
+
+        self._canvas.pack(side="left", fill="both", expand=True)
+        self._v_scrollbar.pack(side="right", fill="y")
+
+
 def create_pishock_credentials_frame(
     master,
     *,
