@@ -44,6 +44,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
     pishock = PiShockInterface(
         username=trainer_settings.get("pishock_username") or "",
         api_key=trainer_settings.get("pishock_api_key") or "",
+        role="trainer",
     )
 
     whisper = WhisperInterface(input_device=input_device)
@@ -80,6 +81,7 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
     pishock = PiShockInterface(
         username=pet_settings.get("pishock_username") or "",
         api_key=pet_settings.get("pishock_api_key") or "",
+        role="pet",
     )
 
     whisper = WhisperInterface(input_device=input_device)

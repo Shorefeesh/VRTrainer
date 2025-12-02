@@ -12,9 +12,24 @@ class PiShockInterface:
     helper used by trainer/pet features.
     """
 
-    def __init__(self, username: str, api_key: str) -> None:
+    def __init__(self, username: str, api_key: str, *, role: str = "trainer") -> None:
+        """Create a new PiShock interface.
+
+        Args:
+            username: PiShock account username.
+            api_key: PiShock API key.
+            role: Which runtime is using this interface, ``\"trainer\"``
+                or ``\"pet\"``. This is used only to decide which OSC
+                parameter name to drive on the avatar:
+
+                * trainer mode: ``Trainer/SendingShock``
+                * pet mode: ``Trainer/BeingShocked``
+        """
         self.username = username
         self.api_key = api_key
+
+        # Normalise role so unexpected values fall back to trainer
+        self._role = "pet" if role == "pet" else "trainer"
 
         self._connected: bool = False
         self._api: Optional[pishock.PiShockAPI] = None
@@ -88,10 +103,10 @@ class PiShockInterface:
         This method is safe to call even when PiShock is not configured
         yet; in that case it simply returns without raising.
         """
-        # Always emit an OSC parameter so the Trainer avatar can react
-        # visually to shocks, even if the PiShock API itself is not
-        # configured or connected.
-        self._send_trainer_being_shocked(strength=strength, duration=duration)
+        # Always emit an OSC parameter so the avatars can react visually
+        # to shocks, even if the PiShock API itself is not configured
+        # or connected.
+        self._send_shock_osc(strength=strength, duration=duration)
 
         if not self._connected:
             return
@@ -120,11 +135,12 @@ class PiShockInterface:
             return
 
     # Internal helpers -------------------------------------------------
-    def _send_trainer_being_shocked(self, strength: int, duration: float) -> None:
-        """Send Trainer/BeingShocked OSC parameter for the given duration.
+    def _send_shock_osc(self, strength: int, duration: float) -> None:
+        """Send OSC parameters for the given shock based on runtime role.
 
-        The parameter is sent as a float whose value matches the shock
-        strength so avatar logic can drive effects based on intensity.
+        The parameters are sent as floats whose value matches the shock
+        strength (normalised to 0–1) so avatar logic can drive effects
+        based on intensity.
 
         This helper is intentionally independent from PiShock connection
         status so that the OSC signal is still emitted when credentials
@@ -144,26 +160,35 @@ class PiShockInterface:
         # Normalise strength (0–100) to a 0–1 float for OSC.
         value = max(0.0, min(1.0, float(strength) / 100.0))
 
+        # Decide which OSC addresses to drive based on runtime role.
+        if self._role == "trainer":
+            addresses = ["/avatar/parameters/Trainer/SendingShock"]
+            thread_name = "TrainerSendingShockOSC"
+        else:
+            addresses = ["/avatar/parameters/Trainer/BeingShocked"]
+            thread_name = "PetBeingShockedOSC"
+
         def _worker() -> None:
             try:
                 client = SimpleUDPClient("127.0.0.1", 9000)
-                address = "/avatar/parameters/Trainer/BeingShocked"
 
-                # Set parameter to the shock strength.
-                client.send_message(address, value)
+                # Set parameters to the shock strength.
+                for addr in addresses:
+                    client.send_message(addr, value)
 
                 if safe_duration > 0.0:
                     time.sleep(safe_duration)
 
-                # Reset parameter back to zero.
-                client.send_message(address, 0.0)
+                # Reset parameters back to zero.
+                for addr in addresses:
+                    client.send_message(addr, 0.0)
             except Exception:
                 # Ignore any OSC errors so they never affect feature logic.
                 return
 
         thread = threading.Thread(
             target=_worker,
-            name="TrainerBeingShockedOSC",
+            name=thread_name,
             daemon=True,
         )
         thread.start()
