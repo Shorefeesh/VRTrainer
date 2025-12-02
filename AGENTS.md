@@ -39,5 +39,14 @@ Pet:
 - Set correct `Input Device`
 - Navigate to `Pet` tab
 - Set PiShock `Username` and `API key`
-- Toggle individual `Ear/Tail Pull`, `Speech` modes
+- Toggle individual `Ear/Tail Pull`, `Pronouns` modes
 - Press `Start`
+
+
+## Workflow
+`source venv/bin/activate` Activate venv
+
+
+## Dependencies
+`https://github.com/attwad/python-osc` Python OSC
+`https://github.com/zerario/Python-PiShock` Python PiShock

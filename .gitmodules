@@ -1,0 +1,3 @@
+[submodule "Python-PiShock"]
+	path = Python-PiShock
+	url = https://github.com/zerario/Python-PiShock.git
