@@ -46,7 +46,10 @@ class WhisperInterface:
         self._stop_event = threading.Event()
 
         # Queue of raw audio blocks captured from the microphone.
-        self._audio_queue: "queue.Queue[bytes]" = queue.Queue(maxsize=20)
+        # Use an unbounded queue so we never drop audio when Whisper
+        # is temporarily slower than real time; this prevents missing
+        # transcript chunks during continuous speech.
+        self._audio_queue: "queue.Queue[bytes]" = queue.Queue()
 
         # Transcript storage: ordered list of chunks.
         self._transcript: List[_TranscriptChunk] = []
@@ -141,7 +144,9 @@ class WhisperInterface:
         # Best-effort cleanup.
         self._thread = None
         with self._lock:
-            self._audio_queue = queue.Queue(maxsize=20)
+            # Reset the audio queue; see __init__ for rationale on
+            # using an unbounded queue.
+            self._audio_queue = queue.Queue()
 
     @property
     def is_running(self) -> bool:
@@ -226,7 +231,10 @@ class WhisperInterface:
 
         # Basic audio parameters. These can be tuned later if needed.
         samplerate = 16000
-        block_duration = 5.0  # seconds per transcription window
+        # Shorter windows reduce end-to-end latency and how long the
+        # worker spends inside a single transcription call, which in
+        # turn limits how much buffered audio builds up.
+        block_duration = 3.0  # seconds per transcription window
 
         # Resolve device: ``None`` lets sounddevice pick the default.
         device = None
@@ -272,11 +280,39 @@ class WhisperInterface:
                     if audio.size == 0:
                         continue
 
+                    # Simple energy-based noise/silence gate: if the
+                    # RMS level of the window is extremely low, skip
+                    # transcription entirely. This avoids Whisper
+                    # emitting spurious text from background noise.
+                    try:
+                        rms = float(np.sqrt(np.mean(np.square(audio), dtype="float64")))
+                    except Exception:
+                        rms = 0.0
+
+                    # This threshold is intentionally conservative; it
+                    # can be adjusted via the WHISPER_MIN_RMS
+                    # environment variable if needed.
+                    min_rms_env = os.environ.get("WHISPER_MIN_RMS")
+                    try:
+                        min_rms = float(min_rms_env) if min_rms_env is not None else 0.005
+                    except ValueError:
+                        min_rms = 0.005
+
+                    if rms < min_rms:
+                        continue
+
                     try:
                         # faster_whisper returns an iterator of segments and an
                         # info object. We concatenate the recognised text of all
                         # segments into a single string.
-                        segments, _info = model.transcribe(audio)
+                        # Use the built-in VAD filter when supported to
+                        # further reduce noise-only segments.
+                        try:
+                            segments, _info = model.transcribe(audio, vad_filter=True)
+                        except TypeError:
+                            # Older faster_whisper versions may not
+                            # support vad_filter; fall back gracefully.
+                            segments, _info = model.transcribe(audio)
                     except Exception:
                         # On any transcription error, skip this block.
                         continue
