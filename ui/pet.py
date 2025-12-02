@@ -53,8 +53,31 @@ class PetTab(ttk.Frame):
         status_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
         status_frame.columnconfigure(0, weight=1)
 
-        self.running_status = StatusIndicator(status_frame, "Pet")
-        self.running_status.grid(row=0, column=0, sticky="w", padx=6, pady=6)
+        # VRChat OSC
+        self.osc_status = StatusIndicator(status_frame, "VRChat OSC")
+        self.osc_status.grid(row=0, column=0, sticky="w", padx=6, pady=(4, 0))
+
+        # PiShock
+        self.pishock_status = StatusIndicator(status_frame, "PiShock")
+        self.pishock_status.grid(row=1, column=0, sticky="w", padx=6, pady=(2, 0))
+
+        # Whisper
+        whisper_frame = ttk.Frame(status_frame)
+        whisper_frame.grid(row=2, column=0, sticky="nsew", padx=6, pady=(4, 0))
+        whisper_frame.columnconfigure(0, weight=1)
+
+        self.whisper_status = StatusIndicator(whisper_frame, "Whisper")
+        self.whisper_status.grid(row=0, column=0, sticky="w")
+
+        log_label = ttk.Label(whisper_frame, text="Text log:")
+        log_label.grid(row=1, column=0, sticky="w", pady=(4, 0))
+
+        self.whisper_log = tk.Text(whisper_frame, height=6, wrap="word", state="disabled")
+        self.whisper_log.grid(row=2, column=0, sticky="nsew", pady=(2, 4))
+
+        # Active features
+        self.active_features_status = StatusIndicator(status_frame, "Active features")
+        self.active_features_status.grid(row=3, column=0, sticky="w", padx=6, pady=(2, 6))
 
     # Public helpers -----------------------------------------------------
     def collect_settings(self) -> dict:
@@ -70,9 +93,49 @@ class PetTab(ttk.Frame):
         self._is_running = running
         self.start_button.configure(text="Stop" if running else "Start")
         if running:
-            self.running_status.set_status("Running", "green")
+            self.osc_status.set_status("Receiving parameters", "green")
+            self.pishock_status.set_status("Connected", "green")
+            self.whisper_status.set_status("Running", "green")
+
+            active_features: list[str] = []
+            if self.feature_ear_tail.variable.get():
+                active_features.append("Ear/Tail pull")
+            if self.feature_pronouns.variable.get():
+                active_features.append("Pronouns")
+
+            if active_features:
+                self.active_features_status.set_status(", ".join(active_features), "green")
+            else:
+                self.active_features_status.set_status("None", "grey")
         else:
-            self.running_status.set_status("Stopped", "grey")
+            self.osc_status.set_status("Idle", "grey")
+            self.pishock_status.set_status("Disconnected", "grey")
+            self.whisper_status.set_status("Stopped", "grey")
+            self.active_features_status.set_status("OFF", "grey")
+
+    def update_osc_status(self, osc_status: dict) -> None:
+        """Update the VRChat OSC status line with live diagnostics."""
+        if not self._is_running:
+            return
+
+        messages = osc_status.get("messages_last_10s", 0)
+        expected = osc_status.get("expected_trainer_params_total", 0)
+        found = osc_status.get("found_trainer_params", 0)
+        missing = max(expected - found, 0)
+
+        if expected:
+            text = f"Messages received: {messages} (10s), Parameters found: {found}/{expected} ({missing} missing)"
+        else:
+            text = f"Messages received: {messages} (10s), Parameters found: 0/0"
+
+        if messages == 0:
+            colour = "red"
+        elif missing > 0:
+            colour = "orange"
+        else:
+            colour = "green"
+
+        self.osc_status.set_status(text, colour)
 
     def _toggle_start(self) -> None:
         new_state = not self._is_running

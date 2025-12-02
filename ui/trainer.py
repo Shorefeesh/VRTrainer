@@ -293,12 +293,50 @@ class TrainerTab(ttk.Frame):
             self.osc_status.set_status("Receiving parameters", "green")
             self.pishock_status.set_status("Connected", "green")
             self.whisper_status.set_status("Running", "green")
-            self.active_features_status.set_status("ON", "green")
+
+            active_features: list[str] = []
+            if self.feature_focus.variable.get():
+                active_features.append("Focus")
+            if self.feature_proximity.variable.get():
+                active_features.append("Proximity")
+            if self.feature_tricks.variable.get():
+                active_features.append("Tricks")
+            if self.feature_scolding.variable.get():
+                active_features.append("Scolding")
+
+            if active_features:
+                self.active_features_status.set_status(", ".join(active_features), "green")
+            else:
+                self.active_features_status.set_status("None", "grey")
         else:
             self.osc_status.set_status("Idle", "grey")
             self.pishock_status.set_status("Disconnected", "grey")
             self.whisper_status.set_status("Stopped", "grey")
             self.active_features_status.set_status("OFF", "grey")
+
+    def update_osc_status(self, osc_status: dict) -> None:
+        """Update the VRChat OSC status line with live diagnostics."""
+        if not self._is_running:
+            return
+
+        messages = osc_status.get("messages_last_10s", 0)
+        expected = osc_status.get("expected_trainer_params_total", 0)
+        found = osc_status.get("found_trainer_params", 0)
+        missing = max(expected - found, 0)
+
+        if expected:
+            text = f"Messages received: {messages} (10s), Parameters found: {found}/{expected} ({missing} missing)"
+        else:
+            text = f"Messages received: {messages} (10s), Parameters found: 0/0"
+
+        if messages == 0:
+            colour = "red"
+        elif missing > 0:
+            colour = "orange"
+        else:
+            colour = "green"
+
+        self.osc_status.set_status(text, colour)
 
     def append_whisper_log(self, text: str) -> None:
         """Append a line to the Whisper text log."""

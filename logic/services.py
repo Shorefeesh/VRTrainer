@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Any, List, Optional
+from typing import Any, Dict, List, Optional
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
@@ -176,3 +176,19 @@ def is_trainer_running() -> bool:
 def is_pet_running() -> bool:
     """Return True if pet services are currently active."""
     return _pet_runtime is not None
+
+
+def get_trainer_osc_status() -> Optional[Dict[str, Any]]:
+    """Return a snapshot of trainer OSC diagnostics, if running."""
+    runtime = _trainer_runtime
+    if runtime is None:
+        return None
+    return runtime.osc.get_status_snapshot()
+
+
+def get_pet_osc_status() -> Optional[Dict[str, Any]]:
+    """Return a snapshot of pet OSC diagnostics, if running."""
+    runtime = _pet_runtime
+    if runtime is None:
+        return None
+    return runtime.osc.get_status_snapshot()

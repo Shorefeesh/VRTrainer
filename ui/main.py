@@ -118,6 +118,19 @@ def build_ui(root: tk.Tk) -> None:
 
     notebook.pack(fill="both", expand=True)
 
+    def _refresh_osc_status() -> None:
+        trainer_status = services.get_trainer_osc_status()
+        if trainer_status is not None:
+            trainer_tab.update_osc_status(trainer_status)
+
+        pet_status = services.get_pet_osc_status()
+        if pet_status is not None:
+            pet_tab.update_osc_status(pet_status)
+
+        root.after(1000, _refresh_osc_status)
+
+    _refresh_osc_status()
+
 
 def main() -> None:
     root = create_root()
