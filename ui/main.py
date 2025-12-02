@@ -138,6 +138,25 @@ def build_ui(root: tk.Tk) -> None:
         if pet_status is not None:
             pet_tab.update_osc_status(pet_status)
 
+        # PiShock status
+        trainer_pishock = services.get_trainer_pishock_status()
+        if trainer_pishock is not None:
+            if trainer_pishock["connected"]:
+                trainer_tab.pishock_status.set_status("Connected", "green")
+            elif trainer_pishock["has_credentials"]:
+                trainer_tab.pishock_status.set_status("Not connected", "red")
+            else:
+                trainer_tab.pishock_status.set_status("Not configured", "orange")
+
+        pet_pishock = services.get_pet_pishock_status()
+        if pet_pishock is not None:
+            if pet_pishock["connected"]:
+                pet_tab.pishock_status.set_status("Connected", "green")
+            elif pet_pishock["has_credentials"]:
+                pet_tab.pishock_status.set_status("Not connected", "red")
+            else:
+                pet_tab.pishock_status.set_status("Not configured", "orange")
+
         # Whisper transcript log
         trainer_whisper_text = services.get_trainer_whisper_log_text()
         if trainer_whisper_text:

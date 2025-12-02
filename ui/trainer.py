@@ -263,7 +263,8 @@ class TrainerTab(ttk.Frame):
 
         if running:
             self.osc_status.set_status("Receiving parameters", "green")
-            self.pishock_status.set_status("Connected", "green")
+            # Actual PiShock connection state is updated periodically from services.
+            self.pishock_status.set_status("Checking...", "orange")
             self.whisper_status.set_status("Running", "green")
 
             active_features: list[str] = []

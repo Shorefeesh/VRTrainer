@@ -186,12 +186,38 @@ def get_trainer_osc_status() -> Optional[Dict[str, Any]]:
     return runtime.osc.get_status_snapshot()
 
 
+def get_trainer_pishock_status() -> Optional[Dict[str, Any]]:
+    """Return a snapshot of trainer PiShock status, if running."""
+    runtime = _trainer_runtime
+    if runtime is None:
+        return None
+
+    pishock = runtime.pishock
+    return {
+        "connected": pishock.is_connected,
+        "has_credentials": bool(getattr(pishock, "username", "") and getattr(pishock, "api_key", "")),
+    }
+
+
 def get_pet_osc_status() -> Optional[Dict[str, Any]]:
     """Return a snapshot of pet OSC diagnostics, if running."""
     runtime = _pet_runtime
     if runtime is None:
         return None
     return runtime.osc.get_status_snapshot()
+
+
+def get_pet_pishock_status() -> Optional[Dict[str, Any]]:
+    """Return a snapshot of pet PiShock status, if running."""
+    runtime = _pet_runtime
+    if runtime is None:
+        return None
+
+    pishock = runtime.pishock
+    return {
+        "connected": pishock.is_connected,
+        "has_credentials": bool(getattr(pishock, "username", "") and getattr(pishock, "api_key", "")),
+    }
 
 
 def get_trainer_whisper_log_text() -> str:

@@ -1,27 +1,117 @@
 from __future__ import annotations
 
+from pathlib import Path
+from typing import Optional
+import sys
+import pishock
+
 
 class PiShockInterface:
     """Interface wrapper around the PiShock API.
 
-    The concrete shock logic can be implemented later; for now this
-    class simply tracks basic connection lifecycle.
+    This keeps the rest of the codebase decoupled from the concrete
+    Python-PiShock library while exposing a simple ``send_shock``
+    helper used by trainer/pet features.
     """
 
     def __init__(self, username: str, api_key: str) -> None:
         self.username = username
         self.api_key = api_key
-        self._connected = False
+
+        self._connected: bool = False
+        self._api: Optional[pishock.PiShockAPI] = None
+        self._shocker: Optional[pishock.HTTPShocker] = None
+        self._share_code: Optional[str] = None
+
+    def configure_share_code(self, share_code: str) -> None:
+        """Set the default share code to target when sending shocks.
+
+        If no share code is configured, :meth:`send_shock` will be a
+        no-op. This avoids crashing features if credentials are present
+        but no concrete shocker has been selected yet.
+        """
+        self._share_code = share_code
+        if self._api is not None:
+            self._shocker = self._api.shocker(share_code)
 
     def start(self) -> None:
-        """Establish connection or perform any required setup."""
-        # Real implementation would validate credentials / prepare client.
+        """Initialise the PiShock API client and validate credentials."""
+        if not self.username or not self.api_key:
+            # Treat missing credentials as "not connected" but do not fail hard.
+            self._connected = False
+            self._api = None
+            self._shocker = None
+            return
+
+        api = pishock.PiShockAPI(username=self.username, api_key=self.api_key)
+
+        # verify_credentials() returns False on authentication failure.
+        if not api.verify_credentials():
+            self._connected = False
+            self._api = None
+            self._shocker = None
+            return
+
+        self._api = api
         self._connected = True
+
+        # If we already have a share code configured, prepare a shocker instance.
+        if self._share_code:
+            self._shocker = api.shocker(self._share_code)
 
     def stop(self) -> None:
         """Tear down connection or cleanup resources."""
         self._connected = False
+        self._api = None
+        self._shocker = None
 
     @property
     def is_connected(self) -> bool:
         return self._connected
+
+    def send_shock(
+        self,
+        strength: int,
+        duration: float,
+        *,
+        share_code: Optional[str] = None,
+    ) -> None:
+        """Send a shock with the given strength and duration.
+
+        Args:
+            strength: Shock intensity (0-100).
+            duration: Shock duration in seconds. Can be a float in the
+                0.1–1.5 range to use the PiShock short-pulse feature,
+                or an integer 0–15 for whole seconds.
+            share_code: Optional override for the share code. If not
+                given, the interface uses the configured default (see
+                :meth:`configure_share_code`).
+
+        This method is safe to call even when PiShock is not configured
+        yet; in that case it simply returns without raising.
+        """
+        if not self._connected:
+            return
+
+        api = self._api
+        if api is None:
+            return
+
+        # Determine which shocker/share code to use.
+        code = share_code or self._share_code
+        if not code:
+            # No share code configured yet – nothing to do.
+            return
+
+        shocker = self._shocker
+        if shocker is None or shocker.sharecode != code:  # type: ignore[attr-defined]
+            shocker = api.shocker(code)
+            self._shocker = shocker
+
+        try:
+            shocker.shock(duration=duration, intensity=strength)
+        except Exception:
+            # For now, swallow all errors so that a failed shock does
+            # not bring down feature logic. Diagnostics can be added
+            # later (logging, UI feedback, etc.).
+            return
