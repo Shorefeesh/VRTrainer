@@ -213,6 +213,18 @@ class WhisperInterface:
         with self._lock:
             self._tag_positions[tag] = len(self._transcript)
 
+    def get_recent_text_chunks(self, count: int = 1) -> List[str]:
+        """Return up to ``count`` most recent transcript chunks (newest last).
+
+        This does not advance any tag cursors; it is intended for lightweight
+        context checks where features need a short look-back window.
+        """
+        if count <= 0:
+            return []
+
+        with self._lock:
+            return [chunk.text for chunk in self._transcript[-count:]]
+
     # ------------------------------------------------------------------
     # Background worker
     # ------------------------------------------------------------------

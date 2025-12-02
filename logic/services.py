@@ -57,13 +57,37 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
     features: List[Any] = []
 
     if trainer_settings.get("feature_focus"):
-        features.append(FocusFeature(osc=osc, pishock=pishock, whisper=whisper, difficulty=str(trainer_settings.get("difficulty") or "Normal")))
+        features.append(
+            FocusFeature(
+                osc=osc,
+                pishock=pishock,
+                whisper=whisper,
+                difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+                names=trainer_settings.get("names") or [],
+            )
+        )
 
     if trainer_settings.get("feature_proximity"):
-        features.append(ProximityFeature(osc=osc, pishock=pishock, whisper=whisper, difficulty=str(trainer_settings.get("difficulty") or "Normal")))
+        features.append(
+            ProximityFeature(
+                osc=osc,
+                pishock=pishock,
+                whisper=whisper,
+                difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+                names=trainer_settings.get("names") or [],
+            )
+        )
 
     if trainer_settings.get("feature_tricks"):
-        features.append(TricksFeature(osc=osc, pishock=pishock, whisper=whisper, difficulty=str(trainer_settings.get("difficulty") or "Normal")))
+        features.append(
+            TricksFeature(
+                osc=osc,
+                pishock=pishock,
+                whisper=whisper,
+                names=trainer_settings.get("names") or [],
+                difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+            )
+        )
 
     if trainer_settings.get("feature_scolding"):
         features.append(

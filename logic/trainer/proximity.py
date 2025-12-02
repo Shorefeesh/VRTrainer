@@ -20,6 +20,7 @@ class ProximityFeature:
         pishock: PiShockInterface,
         whisper: WhisperInterface,
         difficulty: Optional[str] = None,
+        names: Optional[Iterable[str]] = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
@@ -43,12 +44,25 @@ class ProximityFeature:
         self._shock_strength_max: float = 80.0
         self._apply_difficulty(difficulty)
 
+        # Whisper-driven summon command ("come here" / "heel").
+        self._whisper_tag = "trainer_proximity_feature"
+        self._pet_names: List[str] = self._normalise_phrases(names or [])
+        self._command_phrases: List[str] = self._normalise_phrases(["come here", "heel"])
+        self._command_timeout: float = 4.0
+        self._command_target: float = 1
+        self._pending_command_deadline: float | None = None
+
     def start(self) -> None:
         if self._running:
             return
 
         self._running = True
         self._stop_event.clear()
+
+        try:
+            self.whisper.reset_tag(self._whisper_tag)
+        except Exception:
+            pass
 
         thread = self._thread = self._thread_factory()
         thread.start()
@@ -94,6 +108,23 @@ class ProximityFeature:
         while not self._stop_event.is_set():
             now = time.time()
 
+            # Listen for summon commands.
+            try:
+                text = self.whisper.get_new_text(self._whisper_tag)
+            except Exception:
+                text = ""
+
+            if text and self._detect_summon_command(text):
+                self._pending_command_deadline = now + self._command_timeout
+
+            if self._pending_command_deadline is not None:
+                if self._meets_command_target():
+                    self._pending_command_deadline = None
+                elif now >= self._pending_command_deadline and now >= self._cooldown_until:
+                    self._deliver_correction()
+                    self._cooldown_until = now + self._cooldown_seconds
+                    self._pending_command_deadline = None
+
             # Rate-limit shocks.
             if now >= self._cooldown_until and self._is_too_far(now):
                 self._deliver_correction()
@@ -127,3 +158,42 @@ class ProximityFeature:
             self.pishock.send_shock(strength=strength, duration=0.5)
         except Exception:
             return
+
+    def _detect_summon_command(self, text: str) -> bool:
+        """Return True when speech contains a summon command for the pet."""
+        normalised = self._normalise_text(text)
+        if not normalised:
+            return False
+
+        if self._pet_names:
+            recent_chunks = self.whisper.get_recent_text_chunks(count=3)
+            recent_normalised = " ".join(self._normalise_text(chunk) for chunk in recent_chunks if chunk)
+            if not any(name in recent_normalised for name in self._pet_names):
+                return False
+
+        return any(phrase in normalised for phrase in self._command_phrases)
+
+    def _meets_command_target(self) -> bool:
+        """True if proximity is sufficiently close after a summon command."""
+        proximity = self.osc.get_float_param("Trainer/Proximity", default=0.0)
+        return proximity >= self._command_target
+
+    @staticmethod
+    def _normalise_phrases(phrases: Iterable[str]) -> List[str]:
+        return [ProximityFeature._normalise_text(p) for p in phrases if ProximityFeature._normalise_text(p)]
+
+    @staticmethod
+    def _normalise_text(text: str) -> str:
+        if not text:
+            return ""
+
+        chars: List[str] = []
+        for ch in text.lower():
+            if ch.isalnum():
+                chars.append(ch)
+            elif ch.isspace():
+                chars.append(" ")
+            else:
+                chars.append(" ")
+
+        return " ".join("".join(chars).split())

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from copy import deepcopy
+import sys
 from pathlib import Path
 from typing import Any, Dict
 
@@ -13,7 +14,20 @@ except ImportError as exc:  # pragma: no cover - environment specific
     ) from exc
 
 
-CONFIG_PATH = Path(__file__).with_name("config.yaml")
+def _config_target_path() -> Path:
+    """Return a writable config path that survives PyInstaller onefile.
+
+    When frozen, ``__file__`` points inside the temporary extraction
+    directory, so writes would disappear between runs. Using the
+    executable's location keeps the config alongside the bundled app.
+    """
+    if getattr(sys, "frozen", False):
+        return Path(sys.executable).resolve().with_name("config.yaml")
+
+    return Path(__file__).resolve().with_name("config.yaml")
+
+
+CONFIG_PATH = _config_target_path()
 
 
 def _default_config() -> Dict[str, Any]:

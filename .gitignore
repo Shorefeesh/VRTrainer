@@ -1,3 +1,7 @@
 venv/
 *__pycache__*
 models/
+config.yaml
+dist/
+build/
+*.spec

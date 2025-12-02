@@ -1,0 +1,5 @@
+pyyaml
+python-osc
+pishock
+sounddevice
+faster-whisper

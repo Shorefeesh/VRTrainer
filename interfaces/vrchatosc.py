@@ -25,6 +25,11 @@ class VRChatOSCInterface:
         self._expected_trainer_params:  set[str] = {
             "Trainer/Proximity",
             "Trainer/Focus",
+            "Trainer/Paw",
+            "Trainer/HandNearFloor",
+            "Trainer/FootNearFloor",
+            "Trainer/HeadNearFloor",
+            "Trainer/HipsNearFloor",
         }
         self._expected_pet_pull_params: set[str] = {
             "LeftEar_IsGrabbed",

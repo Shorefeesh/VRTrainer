@@ -266,7 +266,6 @@ class TrainerTab(ScrollableFrame):
             "feature_scolding": self.feature_scolding.variable.get(),
             "difficulty": self.difficulty_row.variable.get(),
             "names": self._get_words_from_text(self.names_text),
-            "command_words": [],
             "scolding_words": self._get_words_from_text(self.scolding_words_text),
         }
 

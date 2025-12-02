@@ -21,6 +21,7 @@ class FocusFeature:
         pishock: PiShockInterface,
         whisper: WhisperInterface,
         difficulty: Optional[str] = None,
+        names: Optional[Iterable[str]] = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
@@ -52,6 +53,14 @@ class FocusFeature:
         # Track time between iterations for smoother meter integration.
         self._last_tick: float | None = None
 
+        # Listening for the pet's name being spoken should drain focus
+        # even if OSC still reports eye contact. Use a dedicated Whisper
+        # tag so this feature does not consume transcripts needed
+        # elsewhere.
+        self._whisper_tag: str = "trainer_focus_feature"
+        self._pet_names: List[str] = self._normalise_phrases(names or [])
+        self._name_penalty: float = 0.15  # meter points removed per detected name call
+
         self._apply_difficulty(difficulty)
 
 
@@ -61,6 +70,13 @@ class FocusFeature:
 
         self._running = True
         self._stop_event.clear()
+
+        # Start reading from the current end of the transcript so we
+        # only react to new speech after the feature starts.
+        try:
+            self.whisper.reset_tag(self._whisper_tag)
+        except Exception:
+            pass
 
         thread = self._thread = self._thread_factory()
         thread.start()
@@ -114,6 +130,7 @@ class FocusFeature:
             dt = max(0.0, now - (self._last_tick or now))
             self._last_tick = now
 
+            self._apply_name_penalty()
             self._update_meter(dt)
 
             if self._should_shock(now):
@@ -128,6 +145,26 @@ class FocusFeature:
         focused = self.osc.get_bool_param("Trainer/Focus", default=False)
         delta = (self._fill_rate if focused else -self._drain_rate) * dt
         self._focus_meter = max(0.0, min(1.0, self._focus_meter + delta))
+
+    def _apply_name_penalty(self) -> None:
+        """Drain the meter when the pet's name is called out loud."""
+        if not self._pet_names:
+            return
+
+        try:
+            text = self.whisper.get_new_text(self._whisper_tag)
+        except Exception:
+            return
+
+        if not text:
+            return
+
+        normalised = self._normalise(text)
+        if not normalised:
+            return
+
+        if any(name in normalised for name in self._pet_names):
+            self._focus_meter = max(0.0, self._focus_meter - self._name_penalty)
 
     def _should_shock(self, now: float) -> bool:
         """Return True when focus is low and cooldown expired."""
@@ -145,3 +182,25 @@ class FocusFeature:
         except Exception:
             # Never let PiShock errors break the feature loop.
             return
+
+    @staticmethod
+    def _normalise_phrases(words: Iterable[str]) -> List[str]:
+        """Normalise configured pet names for matching."""
+        return [FocusFeature._normalise(word) for word in words if word and FocusFeature._normalise(word)]
+
+    @staticmethod
+    def _normalise(text: str) -> str:
+        """Lowercase, strip punctuation, and collapse whitespace."""
+        if not text:
+            return ""
+
+        chars: List[str] = []
+        for ch in text.lower():
+            if ch.isalnum():
+                chars.append(ch)
+            elif ch.isspace():
+                chars.append(" ")
+            else:
+                chars.append(" ")
+
+        return " ".join("".join(chars).split())
