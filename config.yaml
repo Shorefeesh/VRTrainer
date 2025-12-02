@@ -1,5 +1,5 @@
 settings:
-  input_device: 'Headset (WH-1000XM5 Hands-Free '
+  input_device: Microsoft Sound Mapper - Input
 trainer:
   active_profile: Kyt
   profiles:

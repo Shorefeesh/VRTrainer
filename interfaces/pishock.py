@@ -1,8 +1,6 @@
 from __future__ import annotations
 
-from pathlib import Path
 from typing import Optional
-import sys
 import pishock
 
 
@@ -90,6 +88,11 @@ class PiShockInterface:
         This method is safe to call even when PiShock is not configured
         yet; in that case it simply returns without raising.
         """
+        # Always emit an OSC parameter so the Trainer avatar can react
+        # visually to shocks, even if the PiShock API itself is not
+        # configured or connected.
+        self._send_trainer_being_shocked(strength=strength, duration=duration)
+
         if not self._connected:
             return
 
@@ -115,3 +118,52 @@ class PiShockInterface:
             # not bring down feature logic. Diagnostics can be added
             # later (logging, UI feedback, etc.).
             return
+
+    # Internal helpers -------------------------------------------------
+    def _send_trainer_being_shocked(self, strength: int, duration: float) -> None:
+        """Send Trainer/BeingShocked OSC parameter for the given duration.
+
+        The parameter is sent as a float whose value matches the shock
+        strength so avatar logic can drive effects based on intensity.
+
+        This helper is intentionally independent from PiShock connection
+        status so that the OSC signal is still emitted when credentials
+        are missing or invalid.
+        """
+        try:
+            from pythonosc.udp_client import SimpleUDPClient
+        except Exception:
+            # If python-osc is not available, silently skip OSC output.
+            return
+
+        import threading
+        import time
+
+        # Clamp duration to a sensible non-negative value.
+        safe_duration = max(float(duration), 0.0)
+        # Normalise strength (0–100) to a 0–1 float for OSC.
+        value = max(0.0, min(1.0, float(strength) / 100.0))
+
+        def _worker() -> None:
+            try:
+                client = SimpleUDPClient("127.0.0.1", 9000)
+                address = "/avatar/parameters/Trainer/BeingShocked"
+
+                # Set parameter to the shock strength.
+                client.send_message(address, value)
+
+                if safe_duration > 0.0:
+                    time.sleep(safe_duration)
+
+                # Reset parameter back to zero.
+                client.send_message(address, 0.0)
+            except Exception:
+                # Ignore any OSC errors so they never affect feature logic.
+                return
+
+        thread = threading.Thread(
+            target=_worker,
+            name="TrainerBeingShockedOSC",
+            daemon=True,
+        )
+        thread.start()
