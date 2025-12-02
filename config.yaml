@@ -1,0 +1,15 @@
+settings:
+  input_device: null
+trainer:
+  active_profile: Kyt
+  profiles:
+    Kyt:
+      profile: Kyt
+      pishock_username: ''
+      pishock_api_key: ''
+      feature_focus: true
+      feature_proximity: false
+      feature_tricks: false
+      feature_scolding: false
+      difficulty: Normal
+pet: {}

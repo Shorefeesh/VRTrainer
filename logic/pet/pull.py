@@ -1,0 +1,30 @@
+from __future__ import annotations
+
+from interfaces.pishock import PiShockInterface
+from interfaces.vrchatosc import VRChatOSCInterface
+from interfaces.whisper import WhisperInterface
+
+
+class PullFeature:
+    """Pet ear/tail pull feature.
+
+    Uses OSC parameters to track ear/tail stretch and PiShock to apply
+    feedback when limits are exceeded.
+    """
+
+    def __init__(
+        self,
+        osc: VRChatOSCInterface,
+        pishock: PiShockInterface,
+        whisper: WhisperInterface,
+    ) -> None:
+        self.osc = osc
+        self.pishock = pishock
+        self.whisper = whisper
+        self._running = False
+
+    def start(self) -> None:
+        self._running = True
+
+    def stop(self) -> None:
+        self._running = False

@@ -47,6 +47,13 @@ Pet:
 `source venv/bin/activate` Activate venv
 
 
+## Index
+`avatar/` Parameter descriptions
+`interfaces/` Interface handlers
+`logic/` Feature implementations
+`ui/` UI code
+
+
 ## Dependencies
 `https://github.com/attwad/python-osc` Python OSC
 `https://github.com/zerario/Python-PiShock` Python PiShock
