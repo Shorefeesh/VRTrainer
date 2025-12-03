@@ -24,6 +24,7 @@ class PullFeature:
         self.pishock = pishock
         self.whisper = whisper
         self._running = False
+        self._enabled = True
 
         # Background worker that polls OSC parameters.
         self._thread: threading.Thread | None = None
@@ -75,6 +76,11 @@ class PullFeature:
         import time
 
         while not self._stop_event.is_set():
+            if not self._enabled:
+                if self._stop_event.wait(self._poll_interval):
+                    break
+                continue
+
             now = time.time()
 
             # Avoid sending multiple shocks in quick succession when
@@ -85,6 +91,11 @@ class PullFeature:
 
             if self._stop_event.wait(self._poll_interval):
                 break
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable ear/tail pull monitoring."""
+
+        self._enabled = bool(enabled)
 
     def _check_and_maybe_shock(self, now: float) -> bool:
         """Return True if a shock was sent based on current parameters."""

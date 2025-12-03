@@ -38,6 +38,17 @@ _trainer_runtime: Optional[TrainerRuntime] = None
 _pet_runtime: Optional[PetRuntime] = None
 
 
+def _apply_feature_flags(features: List[Any], feature_flags: Dict[type, bool]) -> None:
+    """Set enabled state on all known features when supported."""
+
+    for feature in features:
+        for cls, enabled in feature_flags.items():
+            if isinstance(feature, cls):
+                if hasattr(feature, "set_enabled"):
+                    feature.set_enabled(bool(enabled))
+                break
+
+
 def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str]) -> TrainerRuntime:
     osc = VRChatOSCInterface()
 
@@ -54,51 +65,46 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
     pishock.start()
     whisper.start()
 
-    features: List[Any] = []
+    features: List[Any] = [
+        FocusFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+            names=trainer_settings.get("names") or [],
+        ),
+        ProximityFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+            names=trainer_settings.get("names") or [],
+        ),
+        TricksFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            names=trainer_settings.get("names") or [],
+            difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+        ),
+        ScoldingFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            scolding_words=trainer_settings.get("scolding_words") or [],
+            difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+        ),
+    ]
 
-    if trainer_settings.get("feature_focus"):
-        features.append(
-            FocusFeature(
-                osc=osc,
-                pishock=pishock,
-                whisper=whisper,
-                difficulty=str(trainer_settings.get("difficulty") or "Normal"),
-                names=trainer_settings.get("names") or [],
-            )
-        )
-
-    if trainer_settings.get("feature_proximity"):
-        features.append(
-            ProximityFeature(
-                osc=osc,
-                pishock=pishock,
-                whisper=whisper,
-                difficulty=str(trainer_settings.get("difficulty") or "Normal"),
-                names=trainer_settings.get("names") or [],
-            )
-        )
-
-    if trainer_settings.get("feature_tricks"):
-        features.append(
-            TricksFeature(
-                osc=osc,
-                pishock=pishock,
-                whisper=whisper,
-                names=trainer_settings.get("names") or [],
-                difficulty=str(trainer_settings.get("difficulty") or "Normal"),
-            )
-        )
-
-    if trainer_settings.get("feature_scolding"):
-        features.append(
-            ScoldingFeature(
-                osc=osc,
-                pishock=pishock,
-                whisper=whisper,
-                scolding_words=trainer_settings.get("scolding_words") or [],
-                difficulty=str(trainer_settings.get("difficulty") or "Normal"),
-            )
-        )
+    _apply_feature_flags(
+        features,
+        {
+            FocusFeature: bool(trainer_settings.get("feature_focus")),
+            ProximityFeature: bool(trainer_settings.get("feature_proximity")),
+            TricksFeature: bool(trainer_settings.get("feature_tricks")),
+            ScoldingFeature: bool(trainer_settings.get("feature_scolding")),
+        },
+    )
 
     for feature in features:
         if hasattr(feature, "start"):
@@ -122,13 +128,18 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
     pishock.start()
     whisper.start()
 
-    features: List[Any] = []
+    features: List[Any] = [
+        PullFeature(osc=osc, pishock=pishock, whisper=whisper),
+        PronounsFeature(osc=osc, pishock=pishock, whisper=whisper),
+    ]
 
-    if pet_settings.get("feature_ear_tail"):
-        features.append(PullFeature(osc=osc, pishock=pishock, whisper=whisper))
-
-    if pet_settings.get("feature_pronouns"):
-        features.append(PronounsFeature(osc=osc, pishock=pishock, whisper=whisper))
+    _apply_feature_flags(
+        features,
+        {
+            PullFeature: bool(pet_settings.get("feature_ear_tail")),
+            PronounsFeature: bool(pet_settings.get("feature_pronouns")),
+        },
+    )
 
     for feature in features:
         if hasattr(feature, "start"):
@@ -150,6 +161,24 @@ def start_trainer(trainer_settings: dict, input_device: Optional[str]) -> None:
         stop_trainer()
 
     _trainer_runtime = _build_trainer_interfaces(trainer_settings, input_device)
+
+
+def update_trainer_feature_states(trainer_settings: dict) -> None:
+    """Update trainer feature enablement without restarting services."""
+
+    runtime = _trainer_runtime
+    if runtime is None:
+        return
+
+    _apply_feature_flags(
+        runtime.features,
+        {
+            FocusFeature: bool(trainer_settings.get("feature_focus")),
+            ProximityFeature: bool(trainer_settings.get("feature_proximity")),
+            TricksFeature: bool(trainer_settings.get("feature_tricks")),
+            ScoldingFeature: bool(trainer_settings.get("feature_scolding")),
+        },
+    )
 
 
 def stop_trainer() -> None:
@@ -181,6 +210,22 @@ def start_pet(pet_settings: dict, input_device: Optional[str]) -> None:
         stop_pet()
 
     _pet_runtime = _build_pet_interfaces(pet_settings, input_device)
+
+
+def update_pet_feature_states(pet_settings: dict) -> None:
+    """Update pet feature enablement without restarting services."""
+
+    runtime = _pet_runtime
+    if runtime is None:
+        return
+
+    _apply_feature_flags(
+        runtime.features,
+        {
+            PullFeature: bool(pet_settings.get("feature_ear_tail")),
+            PronounsFeature: bool(pet_settings.get("feature_pronouns")),
+        },
+    )
 
 
 def stop_pet() -> None:

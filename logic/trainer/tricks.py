@@ -34,6 +34,7 @@ class TricksFeature:
         self.pishock = pishock
         self.whisper = whisper
         self._running = False
+        self._enabled = True
 
         import threading
 
@@ -124,6 +125,12 @@ class TricksFeature:
         while not self._stop_event.is_set():
             now = time.time()
 
+            if not self._enabled:
+                self._pending = None
+                if self._stop_event.wait(self._poll_interval):
+                    break
+                continue
+
             # Check for newly spoken commands.
             try:
                 text = self.whisper.get_new_text(self._whisper_tag)
@@ -149,6 +156,13 @@ class TricksFeature:
 
             if self._stop_event.wait(self._poll_interval):
                 break
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable command enforcement."""
+
+        self._enabled = bool(enabled)
+        if not self._enabled:
+            self._pending = None
 
     def _detect_command(self, text: str) -> str | None:
         """Return the internal command name if text contains name+command."""
