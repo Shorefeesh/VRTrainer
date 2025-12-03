@@ -56,6 +56,7 @@ class FocusFeature:
 
         # Track time between iterations for smoother meter integration.
         self._last_tick: float | None = None
+        self._last_sample_log: float = 0.0
 
         # Listening for the pet's name being spoken should drain focus
         # even if OSC still reports eye contact. Use a dedicated Whisper
@@ -67,7 +68,7 @@ class FocusFeature:
 
         self._apply_difficulty(difficulty)
 
-        self._log("Focus feature initialised")
+        self._log("event=init feature=focus")
 
 
     def start(self) -> None:
@@ -87,7 +88,7 @@ class FocusFeature:
         thread = self._thread = self._thread_factory()
         thread.start()
 
-        self._log("Focus feature started")
+        self._log("event=start feature=focus")
 
     def stop(self) -> None:
         if not self._running:
@@ -101,7 +102,7 @@ class FocusFeature:
             thread.join(timeout=1.0)
         self._thread = None
 
-        self._log("Focus feature stopped")
+        self._log("event=stop feature=focus")
 
     # Internal helpers -------------------------------------------------
     def _apply_difficulty(self, difficulty: Optional[str]) -> None:
@@ -147,6 +148,7 @@ class FocusFeature:
 
             self._apply_name_penalty()
             self._update_meter(dt)
+            self._log_sample(now)
 
             if self._should_shock(now):
                 self._deliver_correction()
@@ -200,7 +202,7 @@ class FocusFeature:
             strength = max(self._shock_strength_min, min(self._shock_strength_max, int(deficit * self._shock_strength_max)))
             self.pishock.send_shock(strength=strength, duration=0.5)
             self._log(
-                f"Shock delivered; focus meter={self._focus_meter:.2f}, threshold={self._shock_threshold:.2f}, strength={strength}"
+                f"event=shock feature=focus meter={self._focus_meter:.3f} threshold={self._shock_threshold:.3f} strength={strength}"
             )
         except Exception:
             # Never let PiShock errors break the feature loop.
@@ -215,6 +217,17 @@ class FocusFeature:
             logger.log(message)
         except Exception:
             return
+
+    def _log_sample(self, now: float) -> None:
+        """Periodically log the focus meter for timeline visualisation."""
+
+        if now - self._last_sample_log < 1.0:
+            return
+
+        self._last_sample_log = now
+        self._log(
+            f"event=sample feature=focus meter={self._focus_meter:.3f} threshold={self._shock_threshold:.3f}"
+        )
 
     @staticmethod
     def _normalise_phrases(words: Iterable[str]) -> List[str]:
