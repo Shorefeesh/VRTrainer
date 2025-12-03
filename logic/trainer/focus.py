@@ -27,6 +27,7 @@ class FocusFeature:
         self.pishock = pishock
         self.whisper = whisper
         self._running = False
+        self._enabled = True
 
         # Background worker that continually updates a simple "focus
         # meter" based on whether the pet is looking at the trainer.
@@ -130,6 +131,11 @@ class FocusFeature:
             dt = max(0.0, now - (self._last_tick or now))
             self._last_tick = now
 
+            if not self._enabled:
+                if self._stop_event.wait(self._poll_interval):
+                    break
+                continue
+
             self._apply_name_penalty()
             self._update_meter(dt)
 
@@ -139,6 +145,11 @@ class FocusFeature:
 
             if self._stop_event.wait(self._poll_interval):
                 break
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable focus monitoring without stopping the thread."""
+
+        self._enabled = bool(enabled)
 
     def _update_meter(self, dt: float) -> None:
         """Raise or lower the focus meter based on OSC boolean."""

@@ -55,6 +55,8 @@ def build_ui(root: tk.Tk) -> None:
     def on_trainer_settings_changed(settings: dict) -> None:
         trainer_profile.update_profile_from_settings(config, settings)
         save_config(config)
+        if services.is_trainer_running():
+            services.update_trainer_feature_states(settings)
 
     def on_trainer_profile_selected(profile_name: str) -> None:
         if not profile_name:
@@ -114,6 +116,8 @@ def build_ui(root: tk.Tk) -> None:
     def on_pet_settings_changed(settings: dict) -> None:
         config["pet"] = dict(settings)
         save_config(config)
+        if services.is_pet_running():
+            services.update_pet_feature_states(settings)
 
     def on_pet_start(running: bool) -> None:
         """Callback for when the Pet tab Start/Stop button is toggled."""

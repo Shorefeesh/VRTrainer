@@ -26,6 +26,7 @@ class ProximityFeature:
         self.pishock = pishock
         self.whisper = whisper
         self._running = False
+        self._enabled = True
 
         # Background polling loop.
         import threading
@@ -108,6 +109,12 @@ class ProximityFeature:
         while not self._stop_event.is_set():
             now = time.time()
 
+            if not self._enabled:
+                self._breach_started_at = None
+                if self._stop_event.wait(self._poll_interval):
+                    break
+                continue
+
             # Listen for summon commands.
             try:
                 text = self.whisper.get_new_text(self._whisper_tag)
@@ -133,6 +140,13 @@ class ProximityFeature:
 
             if self._stop_event.wait(self._poll_interval):
                 break
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable proximity enforcement."""
+
+        self._enabled = bool(enabled)
+        if not self._enabled:
+            self._breach_started_at = None
 
     def _is_too_far(self, now: float) -> bool:
         """Return True if proximity has been below threshold long enough."""

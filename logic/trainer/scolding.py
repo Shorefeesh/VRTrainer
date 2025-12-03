@@ -29,6 +29,7 @@ class ScoldingFeature:
         self.pishock = pishock
         self.whisper = whisper
         self._running = False
+        self._enabled = True
 
         # Background worker thread that consumes Whisper transcripts.
         self._thread: Optional[threading.Thread] = None
@@ -100,6 +101,11 @@ class ScoldingFeature:
     def _worker_loop(self) -> None:
         """Background loop that watches Whisper transcripts."""
         while not self._stop_event.is_set():
+            if not self._enabled:
+                if self._stop_event.wait(0.5):
+                    break
+                continue
+
             try:
                 text = self.whisper.get_new_text(self._whisper_tag)
             except Exception:
@@ -116,6 +122,11 @@ class ScoldingFeature:
             # quickly to new speech.
             if self._stop_event.wait(0.5):
                 break
+
+    def set_enabled(self, enabled: bool) -> None:
+        """Enable or disable scolding detection."""
+
+        self._enabled = bool(enabled)
 
     def _contains_scolding(self, text: str) -> bool:
         """Return True if the text includes any configured scolding phrase."""
