@@ -65,7 +65,7 @@ class PronounsFeature:
             "myself",
         }
 
-        self._log("Pronouns feature initialised")
+        self._log("event=init feature=pronouns")
 
     def start(self) -> None:
         if self._running:
@@ -90,7 +90,7 @@ class PronounsFeature:
         self._thread = thread
         thread.start()
 
-        self._log("Pronouns feature started")
+        self._log("event=start feature=pronouns")
 
     def stop(self) -> None:
         if not self._running:
@@ -104,7 +104,7 @@ class PronounsFeature:
             thread.join(timeout=1.0)
         self._thread = None
 
-        self._log("Pronouns feature stopped")
+        self._log("event=stop feature=pronouns")
 
     # Internal helpers -------------------------------------------------
     def _worker_loop(self) -> None:
@@ -167,7 +167,7 @@ class PronounsFeature:
             # this feature is usable out of the box without further
             # tuning. Values can be adjusted later or made configurable.
             self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
-            self._log(f"Shock delivered for pronoun violation; strength={self._shock_strength}")
+            self._log(f"event=shock feature=pronouns strength={self._shock_strength}")
         except Exception:
             # Never let PiShock errors break the feature loop.
             return

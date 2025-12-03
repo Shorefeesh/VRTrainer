@@ -55,7 +55,7 @@ class ScoldingFeature:
         self._shock_strength: int = 30
         self._apply_difficulty(difficulty)
 
-        self._log("Scolding feature initialised")
+        self._log("event=init feature=scolding")
 
     def start(self) -> None:
         if self._running:
@@ -80,7 +80,7 @@ class ScoldingFeature:
         self._thread = thread
         thread.start()
 
-        self._log("Scolding feature started")
+        self._log("event=start feature=scolding")
 
     def stop(self) -> None:
         if not self._running:
@@ -94,7 +94,7 @@ class ScoldingFeature:
             thread.join(timeout=1.0)
         self._thread = None
 
-        self._log("Scolding feature stopped")
+        self._log("event=stop feature=scolding")
 
     # Internal helpers -------------------------------------------------
     def _apply_difficulty(self, difficulty: Optional[str]) -> None:
@@ -180,7 +180,7 @@ class ScoldingFeature:
         """Trigger a corrective shock via PiShock."""
         try:
             self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
-            self._log(f"Shock delivered for scolding; strength={self._shock_strength}")
+            self._log(f"event=shock feature=scolding strength={self._shock_strength}")
         except Exception:
             # Never let PiShock errors break the feature loop.
             return

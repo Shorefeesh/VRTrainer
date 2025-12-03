@@ -9,6 +9,7 @@ from logic.trainer import profile as trainer_profile
 from .settings import SettingsTab
 from .trainer import TrainerTab
 from .pet import PetTab
+from .stats import StatsTab
 
 
 def create_root() -> tk.Tk:
@@ -135,9 +136,12 @@ def build_ui(root: tk.Tk) -> None:
     if pet_settings_conf:
         pet_tab.apply_settings(pet_settings_conf)
 
+    stats_tab = StatsTab(notebook)
+
     notebook.add(settings_tab, text="settings")
     notebook.add(trainer_tab, text="trainer")
     notebook.add(pet_tab, text="pet")
+    notebook.add(stats_tab, text="stats")
 
     notebook.pack(fill="both", expand=True)
 

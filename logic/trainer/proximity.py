@@ -55,8 +55,9 @@ class ProximityFeature:
         self._command_timeout: float = 4.0
         self._command_target: float = 1
         self._pending_command_deadline: float | None = None
+        self._last_sample_log: float = 0.0
 
-        self._log("Proximity feature initialised")
+        self._log("event=init feature=proximity")
 
     def start(self) -> None:
         if self._running:
@@ -73,7 +74,7 @@ class ProximityFeature:
         thread = self._thread = self._thread_factory()
         thread.start()
 
-        self._log("Proximity feature started")
+        self._log("event=start feature=proximity")
 
     def stop(self) -> None:
         if not self._running:
@@ -87,7 +88,7 @@ class ProximityFeature:
             thread.join(timeout=1.0)
         self._thread = None
 
-        self._log("Proximity feature stopped")
+        self._log("event=stop feature=proximity")
 
     # Internal helpers -------------------------------------------------
     def _apply_difficulty(self, difficulty: Optional[str]) -> None:
@@ -117,6 +118,7 @@ class ProximityFeature:
 
         while not self._stop_event.is_set():
             now = time.time()
+            proximity_value = self.osc.get_float_param("Trainer/Proximity", default=1.0)
 
             if not self._enabled:
                 self._breach_started_at = None
@@ -132,21 +134,26 @@ class ProximityFeature:
 
             if text and self._detect_summon_command(text):
                 self._pending_command_deadline = now + self._command_timeout
-                self._log("Summon command detected; awaiting proximity improvement")
+                self._log("event=command_start feature=proximity name=summon")
 
             if self._pending_command_deadline is not None:
-                if self._meets_command_target():
+                if self._meets_command_target(proximity_value):
                     self._pending_command_deadline = None
+                    self._log(
+                        f"event=command_success feature=proximity name=summon proximity={proximity_value:.3f}"
+                    )
                 elif now >= self._pending_command_deadline and now >= self._cooldown_until:
-                    self._deliver_correction("summon command missed")
+                    self._deliver_correction("summon command missed", proximity_value)
                     self._cooldown_until = now + self._cooldown_seconds
                     self._pending_command_deadline = None
 
             # Rate-limit shocks.
-            if now >= self._cooldown_until and self._is_too_far(now):
-                self._deliver_correction("too far from trainer")
+            if now >= self._cooldown_until and self._is_too_far(now, proximity_value):
+                self._deliver_correction("too far from trainer", proximity_value)
                 self._cooldown_until = now + self._cooldown_seconds
                 self._breach_started_at = None
+
+            self._log_sample(now, proximity_value)
 
             if self._stop_event.wait(self._poll_interval):
                 break
@@ -158,9 +165,9 @@ class ProximityFeature:
         if not self._enabled:
             self._breach_started_at = None
 
-    def _is_too_far(self, now: float) -> bool:
+    def _is_too_far(self, now: float, proximity_value: float) -> bool:
         """Return True if proximity has been below threshold long enough."""
-        value = self.osc.get_float_param("Trainer/Proximity", default=1.0)
+        value = proximity_value
 
         if value >= self._proximity_threshold:
             self._breach_started_at = None
@@ -172,16 +179,18 @@ class ProximityFeature:
 
         return (now - self._breach_started_at) >= self._breach_duration
 
-    def _deliver_correction(self, reason: str) -> None:
+    def _deliver_correction(self, reason: str, proximity_value: float | None = None) -> None:
         """Trigger a corrective shock via PiShock."""
         try:
             # Scale intensity by how far away the pet is.
-            proximity = self.osc.get_float_param("Trainer/Proximity", default=0.0)
+            proximity = (
+                proximity_value if proximity_value is not None else self.osc.get_float_param("Trainer/Proximity", default=0.0)
+            )
             distance_factor = max(0.0, (self._proximity_threshold - proximity) / self._proximity_threshold)
             strength = max(self._shock_strength_min, min(self._shock_strength_max, int(distance_factor * self._shock_strength_max)))
             self.pishock.send_shock(strength=strength, duration=0.5)
             self._log(
-                f"Shock delivered ({reason}); proximity={proximity:.3f}, threshold={self._proximity_threshold:.3f}, strength={strength}"
+                f"event=shock feature=proximity reason={reason.replace(' ', '_')} proximity={proximity:.3f} threshold={self._proximity_threshold:.3f} strength={strength}"
             )
         except Exception:
             return
@@ -200,9 +209,11 @@ class ProximityFeature:
 
         return any(phrase in normalised for phrase in self._command_phrases)
 
-    def _meets_command_target(self) -> bool:
+    def _meets_command_target(self, proximity_value: float | None = None) -> bool:
         """True if proximity is sufficiently close after a summon command."""
-        proximity = self.osc.get_float_param("Trainer/Proximity", default=0.0)
+        proximity = (
+            proximity_value if proximity_value is not None else self.osc.get_float_param("Trainer/Proximity", default=0.0)
+        )
         return proximity >= self._command_target
 
     @staticmethod
@@ -234,3 +245,14 @@ class ProximityFeature:
             logger.log(message)
         except Exception:
             return
+
+    def _log_sample(self, now: float, proximity_value: float) -> None:
+        """Periodically log the proximity value for timeline visualisation."""
+
+        if now - self._last_sample_log < 1.0:
+            return
+
+        self._last_sample_log = now
+        self._log(
+            f"event=sample feature=proximity value={proximity_value:.3f} threshold={self._proximity_threshold:.3f}"
+        )

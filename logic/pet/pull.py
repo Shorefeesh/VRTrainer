@@ -46,7 +46,7 @@ class PullFeature:
         # Parameter base names for ears and tail.
         self._targets = ("LeftEar", "RightEar", "Tail")
 
-        self._log("Pull feature initialised")
+        self._log("event=init feature=pull")
 
     def start(self) -> None:
         if self._running:
@@ -63,7 +63,7 @@ class PullFeature:
         self._thread = thread
         thread.start()
 
-        self._log("Pull feature started")
+        self._log("event=start feature=pull")
 
     def stop(self) -> None:
         if not self._running:
@@ -77,7 +77,7 @@ class PullFeature:
             thread.join(timeout=1.0)
         self._thread = None
 
-        self._log("Pull feature stopped")
+        self._log("event=stop feature=pull")
 
     # Internal helpers -------------------------------------------------
     def _worker_loop(self) -> None:
@@ -128,7 +128,7 @@ class PullFeature:
 
             self.pishock.send_shock(strength=strength, duration=0.5)
             self._log(
-                f"Shock delivered; target={target}, stretch={stretch:.2f}, threshold={self._stretch_threshold:.2f}, strength={strength:.1f}"
+                f"event=shock feature=pull target={target} stretch={stretch:.2f} threshold={self._stretch_threshold:.2f} strength={strength:.1f}"
             )
         except Exception:
             # Never let PiShock errors break the feature loop.

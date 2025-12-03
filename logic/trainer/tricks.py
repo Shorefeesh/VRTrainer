@@ -73,7 +73,7 @@ class TricksFeature:
             "roll_over": ["rollover", "roll over"],
         }
 
-        self._log("Tricks feature initialised")
+        self._log("event=init feature=tricks")
 
     def start(self) -> None:
         if self._running:
@@ -98,7 +98,7 @@ class TricksFeature:
         self._thread = thread
         thread.start()
 
-        self._log("Tricks feature started")
+        self._log("event=start feature=tricks")
 
     def stop(self) -> None:
         if not self._running:
@@ -112,7 +112,7 @@ class TricksFeature:
             thread.join(timeout=1.0)
         self._thread = None
 
-        self._log("Tricks feature stopped")
+        self._log("event=stop feature=tricks")
 
     # Internal helpers -------------------------------------------------
     def _apply_difficulty(self, difficulty: str | None) -> None:
@@ -153,12 +153,14 @@ class TricksFeature:
                     started_at=now,
                     deadline=now + self._command_timeout,
                 )
-                self._log(f"Command '{detected}' detected; awaiting completion")
+                self._log(f"event=command_start feature=tricks name={detected}")
 
             # Evaluate the active command, if any.
             if self._pending is not None:
                 if self._is_command_completed(self._pending.name):
-                    self._log(f"Command '{self._pending.name}' completed in {now - self._pending.started_at:.2f}s")
+                    self._log(
+                        f"event=command_success feature=tricks name={self._pending.name} duration={now - self._pending.started_at:.2f}"
+                    )
                     self._pending = None
                 elif now >= self._pending.deadline and now >= self._cooldown_until:
                     self._deliver_failure()
@@ -238,7 +240,9 @@ class TricksFeature:
         """Shock the pet for failing to perform the trick."""
         try:
             self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
-            self._log(f"Shock delivered for incomplete command; strength={self._shock_strength}")
+            self._log(
+                f"event=shock feature=tricks name={self._pending.name if self._pending else 'unknown'} strength={self._shock_strength}"
+            )
         except Exception:
             # Never let PiShock errors break the feature loop.
             return
