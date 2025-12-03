@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from typing import Callable, Iterable
+
 
 class VRChatOSCInterface:
     """Interface to VRChat OSC parameters.
@@ -10,9 +12,12 @@ class VRChatOSCInterface:
     have been observed.
     """
 
-    def __init__(self) -> None:
+    def __init__(
+        self,
+        log_all_events: Callable[[str], None] | None = None,
+        log_relevant_events: Callable[[str], None] | None = None,
+    ) -> None:
         from collections import deque
-        from pathlib import Path
         import threading
 
         self._running = False
@@ -40,6 +45,9 @@ class VRChatOSCInterface:
             "Tail_Stretch",
         }
         self._param_values: dict[str, object] = {}
+
+        self._log_all_events = log_all_events
+        self._log_relevant_events = log_relevant_events
 
         self._server = None
         self._thread = None
@@ -74,6 +82,9 @@ class VRChatOSCInterface:
         self._thread = thread
         thread.start()
 
+        self._log_message(self._log_all_events, f"OSC listener started on {self._host}:{self._port}")
+        self._log_message(self._log_relevant_events, "OSC listener started")
+
     def stop(self) -> None:
         """Stop OSC handling."""
         self._running = False
@@ -92,6 +103,9 @@ class VRChatOSCInterface:
         now = time.time()
         cutoff = now - 10.0
 
+        param_name: str | None = None
+        is_relevant_param = False
+
         with self._lock:
             self._message_times.append(now)
             while self._message_times and self._message_times[0] < cutoff:
@@ -102,11 +116,14 @@ class VRChatOSCInterface:
                 param_name = address[len(prefix_all) :]
                 value = values[0] if values else None
                 self._param_values[param_name] = value
+                is_relevant_param = self._is_relevant_param(param_name)
 
             prefix = "/avatar/parameters/Trainer/"
             if address.startswith(prefix):
                 trainer_suffix = address[len("/avatar/parameters/") :]
                 self._trainer_params_seen.add(trainer_suffix)
+
+        self._log_osc_message(address, values, is_relevant_param)
 
     # Public diagnostics -----------------------------------------------
     def get_status_snapshot(self) -> dict:
@@ -198,3 +215,26 @@ class VRChatOSCInterface:
 
         # Clamp to [0, 1] as documented for stretch parameters.
         return max(0.0, min(1.0, value))
+
+    def _is_relevant_param(self, param_name: str) -> bool:
+        return param_name in self._expected_trainer_params or param_name in self._expected_pet_pull_params
+
+    def _format_osc_line(self, address: str, values: Iterable[object]) -> str:
+        if not values:
+            return address
+        value_repr = ", ".join(repr(value) for value in values)
+        return f"{address} -> {value_repr}"
+
+    def _log_message(self, logger: Callable[[str], None] | None, message: str) -> None:
+        try:
+            if logger is not None:
+                logger(message)
+        except Exception:
+            return
+
+    def _log_osc_message(self, address: str, values: Iterable[object], is_relevant: bool) -> None:
+        line = self._format_osc_line(address, values)
+        self._log_message(self._log_all_events, line)
+
+        if is_relevant:
+            self._log_message(self._log_relevant_events, line)

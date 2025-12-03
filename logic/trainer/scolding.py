@@ -7,6 +7,7 @@ from typing import Iterable, List, Optional
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
+from logic.logging_utils import LogFile
 
 
 class ScoldingFeature:
@@ -24,12 +25,14 @@ class ScoldingFeature:
         *,
         scolding_words: Optional[Iterable[str]] = None,
         difficulty: Optional[str] = None,
+        logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
         self.whisper = whisper
         self._running = False
         self._enabled = True
+        self._logger = logger
 
         # Background worker thread that consumes Whisper transcripts.
         self._thread: Optional[threading.Thread] = None
@@ -51,6 +54,8 @@ class ScoldingFeature:
         # Shock strength can be tuned by difficulty.
         self._shock_strength: int = 30
         self._apply_difficulty(difficulty)
+
+        self._log("Scolding feature initialised")
 
     def start(self) -> None:
         if self._running:
@@ -75,6 +80,8 @@ class ScoldingFeature:
         self._thread = thread
         thread.start()
 
+        self._log("Scolding feature started")
+
     def stop(self) -> None:
         if not self._running:
             return
@@ -86,6 +93,8 @@ class ScoldingFeature:
         if thread is not None:
             thread.join(timeout=1.0)
         self._thread = None
+
+        self._log("Scolding feature stopped")
 
     # Internal helpers -------------------------------------------------
     def _apply_difficulty(self, difficulty: Optional[str]) -> None:
@@ -171,6 +180,17 @@ class ScoldingFeature:
         """Trigger a corrective shock via PiShock."""
         try:
             self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
+            self._log(f"Shock delivered for scolding; strength={self._shock_strength}")
         except Exception:
             # Never let PiShock errors break the feature loop.
+            return
+
+    def _log(self, message: str) -> None:
+        logger = self._logger
+        if logger is None:
+            return
+
+        try:
+            logger.log(message)
+        except Exception:
             return

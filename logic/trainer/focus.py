@@ -5,6 +5,7 @@ from typing import Iterable, List, Optional
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
+from logic.logging_utils import LogFile
 
 
 class FocusFeature:
@@ -22,12 +23,14 @@ class FocusFeature:
         whisper: WhisperInterface,
         difficulty: Optional[str] = None,
         names: Optional[Iterable[str]] = None,
+        logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
         self.whisper = whisper
         self._running = False
         self._enabled = True
+        self._logger = logger
 
         # Background worker that continually updates a simple "focus
         # meter" based on whether the pet is looking at the trainer.
@@ -64,6 +67,8 @@ class FocusFeature:
 
         self._apply_difficulty(difficulty)
 
+        self._log("Focus feature initialised")
+
 
     def start(self) -> None:
         if self._running:
@@ -82,6 +87,8 @@ class FocusFeature:
         thread = self._thread = self._thread_factory()
         thread.start()
 
+        self._log("Focus feature started")
+
     def stop(self) -> None:
         if not self._running:
             return
@@ -93,6 +100,8 @@ class FocusFeature:
         if thread is not None:
             thread.join(timeout=1.0)
         self._thread = None
+
+        self._log("Focus feature stopped")
 
     # Internal helpers -------------------------------------------------
     def _apply_difficulty(self, difficulty: Optional[str]) -> None:
@@ -190,8 +199,21 @@ class FocusFeature:
             deficit = (self._shock_threshold - self._focus_meter) / self._shock_threshold
             strength = max(self._shock_strength_min, min(self._shock_strength_max, int(deficit * self._shock_strength_max)))
             self.pishock.send_shock(strength=strength, duration=0.5)
+            self._log(
+                f"Shock delivered; focus meter={self._focus_meter:.2f}, threshold={self._shock_threshold:.2f}, strength={strength}"
+            )
         except Exception:
             # Never let PiShock errors break the feature loop.
+            return
+
+    def _log(self, message: str) -> None:
+        logger = self._logger
+        if logger is None:
+            return
+
+        try:
+            logger.log(message)
+        except Exception:
             return
 
     @staticmethod

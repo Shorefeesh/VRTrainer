@@ -5,6 +5,7 @@ from typing import Iterable, List, Optional
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
+from logic.logging_utils import LogFile
 
 
 class ProximityFeature:
@@ -21,12 +22,14 @@ class ProximityFeature:
         whisper: WhisperInterface,
         difficulty: Optional[str] = None,
         names: Optional[Iterable[str]] = None,
+        logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
         self.whisper = whisper
         self._running = False
         self._enabled = True
+        self._logger = logger
 
         # Background polling loop.
         import threading
@@ -53,6 +56,8 @@ class ProximityFeature:
         self._command_target: float = 1
         self._pending_command_deadline: float | None = None
 
+        self._log("Proximity feature initialised")
+
     def start(self) -> None:
         if self._running:
             return
@@ -68,6 +73,8 @@ class ProximityFeature:
         thread = self._thread = self._thread_factory()
         thread.start()
 
+        self._log("Proximity feature started")
+
     def stop(self) -> None:
         if not self._running:
             return
@@ -79,6 +86,8 @@ class ProximityFeature:
         if thread is not None:
             thread.join(timeout=1.0)
         self._thread = None
+
+        self._log("Proximity feature stopped")
 
     # Internal helpers -------------------------------------------------
     def _apply_difficulty(self, difficulty: Optional[str]) -> None:
@@ -123,18 +132,19 @@ class ProximityFeature:
 
             if text and self._detect_summon_command(text):
                 self._pending_command_deadline = now + self._command_timeout
+                self._log("Summon command detected; awaiting proximity improvement")
 
             if self._pending_command_deadline is not None:
                 if self._meets_command_target():
                     self._pending_command_deadline = None
                 elif now >= self._pending_command_deadline and now >= self._cooldown_until:
-                    self._deliver_correction()
+                    self._deliver_correction("summon command missed")
                     self._cooldown_until = now + self._cooldown_seconds
                     self._pending_command_deadline = None
 
             # Rate-limit shocks.
             if now >= self._cooldown_until and self._is_too_far(now):
-                self._deliver_correction()
+                self._deliver_correction("too far from trainer")
                 self._cooldown_until = now + self._cooldown_seconds
                 self._breach_started_at = None
 
@@ -162,7 +172,7 @@ class ProximityFeature:
 
         return (now - self._breach_started_at) >= self._breach_duration
 
-    def _deliver_correction(self) -> None:
+    def _deliver_correction(self, reason: str) -> None:
         """Trigger a corrective shock via PiShock."""
         try:
             # Scale intensity by how far away the pet is.
@@ -170,6 +180,9 @@ class ProximityFeature:
             distance_factor = max(0.0, (self._proximity_threshold - proximity) / self._proximity_threshold)
             strength = max(self._shock_strength_min, min(self._shock_strength_max, int(distance_factor * self._shock_strength_max)))
             self.pishock.send_shock(strength=strength, duration=0.5)
+            self._log(
+                f"Shock delivered ({reason}); proximity={proximity:.3f}, threshold={self._proximity_threshold:.3f}, strength={strength}"
+            )
         except Exception:
             return
 
@@ -211,3 +224,13 @@ class ProximityFeature:
                 chars.append(" ")
 
         return " ".join("".join(chars).split())
+
+    def _log(self, message: str) -> None:
+        logger = self._logger
+        if logger is None:
+            return
+
+        try:
+            logger.log(message)
+        except Exception:
+            return
