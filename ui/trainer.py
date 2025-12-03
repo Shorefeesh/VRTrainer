@@ -10,6 +10,8 @@ from .shared import (
     create_features_frame,
     create_pishock_credentials_frame,
     create_running_status_frame,
+    update_running_state_ui,
+    update_osc_status_indicator,
 )
 
 
@@ -307,57 +309,36 @@ class TrainerTab(ScrollableFrame):
     def set_running_state(self, running: bool) -> None:
         """Update UI to reflect running state."""
         self._is_running = running
-        self.start_button.configure(text="Stop" if running else "Start")
 
-        if running:
-            self.osc_status.set_status("Receiving parameters", "green")
-            # Actual PiShock connection state is updated periodically from services.
-            self.pishock_status.set_status("Checking...", "orange")
-            self.whisper_status.set_status("Running", "green")
+        active_features: list[str] = []
+        if self.feature_focus.variable.get():
+            active_features.append("Focus")
+        if self.feature_proximity.variable.get():
+            active_features.append("Proximity")
+        if self.feature_tricks.variable.get():
+            active_features.append("Tricks")
+        if self.feature_scolding.variable.get():
+            active_features.append("Scolding")
 
-            active_features: list[str] = []
-            if self.feature_focus.variable.get():
-                active_features.append("Focus")
-            if self.feature_proximity.variable.get():
-                active_features.append("Proximity")
-            if self.feature_tricks.variable.get():
-                active_features.append("Tricks")
-            if self.feature_scolding.variable.get():
-                active_features.append("Scolding")
-
-            if active_features:
-                self.active_features_status.set_status(", ".join(active_features), "green")
-            else:
-                self.active_features_status.set_status("None", "grey")
-        else:
-            self.osc_status.set_status("Idle", "grey")
-            self.pishock_status.set_status("Disconnected", "grey")
-            self.whisper_status.set_status("Stopped", "grey")
-            self.active_features_status.set_status("OFF", "grey")
+        update_running_state_ui(
+            running=running,
+            start_button=self.start_button,
+            osc_status=self.osc_status,
+            pishock_status=self.pishock_status,
+            whisper_status=self.whisper_status,
+            active_features_status=self.active_features_status,
+            active_features=active_features,
+        )
 
     def update_osc_status(self, osc_status: dict) -> None:
         """Update the VRChat OSC status line with live diagnostics."""
-        if not self._is_running:
-            return
-
-        messages = osc_status.get("messages_last_10s", 0)
-        expected = osc_status.get("expected_trainer_params_total", 0)
-        found = osc_status.get("found_trainer_params", 0)
-        missing = max(expected - found, 0)
-
-        if expected:
-            text = f"Messages received: {messages} (10s), Parameters found: {found}/{expected} ({missing} missing)"
-        else:
-            text = f"Messages received: {messages} (10s), Parameters found: 0/0"
-
-        if messages == 0:
-            colour = "red"
-        elif missing > 0:
-            colour = "orange"
-        else:
-            colour = "green"
-
-        self.osc_status.set_status(text, colour)
+        update_osc_status_indicator(
+            is_running=self._is_running,
+            status_indicator=self.osc_status,
+            osc_status=osc_status,
+            primary_expected_key="expected_trainer_params_total",
+            primary_found_key="found_trainer_params",
+        )
 
     def append_whisper_log(self, text: str) -> None:
         """Append a line to the Whisper text log."""

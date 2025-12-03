@@ -177,3 +177,78 @@ def create_running_status_frame(
     active_features_status.grid(row=3, column=0, sticky="w", padx=6, pady=(2, 6))
 
     return status_frame, osc_status, pishock_status, whisper_status, whisper_log, active_features_status
+
+
+def update_running_state_ui(
+    *,
+    running: bool,
+    start_button: ttk.Button,
+    osc_status: StatusIndicator,
+    pishock_status: StatusIndicator,
+    whisper_status: StatusIndicator,
+    active_features_status: StatusIndicator,
+    active_features: list[str],
+) -> None:
+    """Synchronise common running-state UI pieces between Trainer and Pet tabs."""
+    start_button.configure(text="Stop" if running else "Start")
+
+    if running:
+        osc_status.set_status("Receiving parameters", "green")
+        # Actual PiShock connection state is updated periodically from services.
+        pishock_status.set_status("Checking...", "orange")
+        whisper_status.set_status("Running", "green")
+
+        if active_features:
+            active_features_status.set_status(", ".join(active_features), "green")
+        else:
+            active_features_status.set_status("None", "grey")
+    else:
+        osc_status.set_status("Idle", "grey")
+        pishock_status.set_status("Disconnected", "grey")
+        whisper_status.set_status("Stopped", "grey")
+        active_features_status.set_status("OFF", "grey")
+
+
+def update_osc_status_indicator(
+    *,
+    is_running: bool,
+    status_indicator: StatusIndicator,
+    osc_status: dict,
+    primary_expected_key: str,
+    primary_found_key: str,
+    fallback_expected_key: str | None = None,
+    fallback_found_key: str | None = None,
+) -> None:
+    """Update the VRChat OSC status line with live diagnostics."""
+    if not is_running:
+        return
+
+    messages = osc_status.get("messages_last_10s", 0)
+
+    expected = osc_status.get(primary_expected_key)
+    found = osc_status.get(primary_found_key)
+
+    if (expected is None or found is None) and fallback_expected_key and fallback_found_key:
+        expected = osc_status.get(fallback_expected_key, 0)
+        found = osc_status.get(fallback_found_key, 0)
+
+    expected = expected or 0
+    found = found or 0
+    missing = max(expected - found, 0)
+
+    if expected:
+        text = (
+            f"Messages received: {messages} (10s), "
+            f"Parameters found: {found}/{expected} ({missing} missing)"
+        )
+    else:
+        text = f"Messages received: {messages} (10s), Parameters found: 0/0"
+
+    if messages == 0:
+        colour = "red"
+    elif missing > 0:
+        colour = "orange"
+    else:
+        colour = "green"
+
+    status_indicator.set_status(text, colour)

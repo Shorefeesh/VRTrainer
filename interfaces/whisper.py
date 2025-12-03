@@ -114,12 +114,33 @@ class WhisperInterface:
                     # so we do not redownload on every run.
                     kwargs["download_root"] = str(cache_dir)
 
+                # Let users override the device/compute type via environment
+                # variables, but default to CPU to avoid CUDA/cuDNN issues on
+                # machines without a full GPU toolchain installed.
+                device = os.environ.get("WHISPER_DEVICE", "cpu")
+                compute_type = os.environ.get("WHISPER_COMPUTE_TYPE")
+                if device:
+                    kwargs["device"] = device
+                if compute_type:
+                    kwargs["compute_type"] = compute_type
+
                 try:  # pragma: no cover - environment/model specific
                     _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
                 except Exception:
-                    # If model load fails, still mark running but skip background work.
-                    self._running = True
-                    return
+                    # If model load fails (e.g. missing CUDA/cuDNN when the
+                    # GPU backend is requested), fall back to a safe CPU-only
+                    # configuration before giving up.
+                    if device != "cpu":
+                        try:
+                            kwargs["device"] = "cpu"
+                            kwargs.pop("compute_type", None)
+                            _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
+                        except Exception:
+                            self._running = True
+                            return
+                    else:
+                        self._running = True
+                        return
 
         self._whisper_model = _SHARED_WHISPER_MODEL
 
