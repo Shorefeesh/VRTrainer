@@ -3,6 +3,7 @@ from __future__ import annotations
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
+from logic.logging_utils import LogFile
 
 
 class _PendingCommand:
@@ -29,12 +30,14 @@ class TricksFeature:
         *,
         names: list[str] | None = None,
         difficulty: str | None = None,
+        logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
         self.whisper = whisper
         self._running = False
         self._enabled = True
+        self._logger = logger
 
         import threading
 
@@ -70,6 +73,8 @@ class TricksFeature:
             "roll_over": ["rollover", "roll over"],
         }
 
+        self._log("Tricks feature initialised")
+
     def start(self) -> None:
         if self._running:
             return
@@ -93,6 +98,8 @@ class TricksFeature:
         self._thread = thread
         thread.start()
 
+        self._log("Tricks feature started")
+
     def stop(self) -> None:
         if not self._running:
             return
@@ -104,6 +111,8 @@ class TricksFeature:
         if thread is not None:
             thread.join(timeout=1.0)
         self._thread = None
+
+        self._log("Tricks feature stopped")
 
     # Internal helpers -------------------------------------------------
     def _apply_difficulty(self, difficulty: str | None) -> None:
@@ -144,10 +153,12 @@ class TricksFeature:
                     started_at=now,
                     deadline=now + self._command_timeout,
                 )
+                self._log(f"Command '{detected}' detected; awaiting completion")
 
             # Evaluate the active command, if any.
             if self._pending is not None:
                 if self._is_command_completed(self._pending.name):
+                    self._log(f"Command '{self._pending.name}' completed in {now - self._pending.started_at:.2f}s")
                     self._pending = None
                 elif now >= self._pending.deadline and now >= self._cooldown_until:
                     self._deliver_failure()
@@ -227,6 +238,7 @@ class TricksFeature:
         """Shock the pet for failing to perform the trick."""
         try:
             self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
+            self._log(f"Shock delivered for incomplete command; strength={self._shock_strength}")
         except Exception:
             # Never let PiShock errors break the feature loop.
             return
@@ -247,3 +259,13 @@ class TricksFeature:
                 chars.append(" ")
 
         return " ".join("".join(chars).split())
+
+    def _log(self, message: str) -> None:
+        logger = self._logger
+        if logger is None:
+            return
+
+        try:
+            logger.log(message)
+        except Exception:
+            return

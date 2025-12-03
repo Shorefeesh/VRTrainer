@@ -7,6 +7,7 @@ from typing import Optional, Set
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
+from logic.logging_utils import LogFile
 
 
 class PronounsFeature:
@@ -21,6 +22,7 @@ class PronounsFeature:
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
         whisper: WhisperInterface,
+        logger: LogFile | None = None,
     ) -> None:
         # Interfaces are provided for future expansion; OSC is not
         # currently used by this feature but is kept for parity with
@@ -30,6 +32,7 @@ class PronounsFeature:
         self.whisper = whisper
         self._running = False
         self._enabled = True
+        self._logger = logger
 
         # Background worker thread that consumes Whisper transcripts.
         self._thread: Optional[threading.Thread] = None
@@ -62,6 +65,8 @@ class PronounsFeature:
             "myself",
         }
 
+        self._log("Pronouns feature initialised")
+
     def start(self) -> None:
         if self._running:
             return
@@ -85,6 +90,8 @@ class PronounsFeature:
         self._thread = thread
         thread.start()
 
+        self._log("Pronouns feature started")
+
     def stop(self) -> None:
         if not self._running:
             return
@@ -96,6 +103,8 @@ class PronounsFeature:
         if thread is not None:
             thread.join(timeout=1.0)
         self._thread = None
+
+        self._log("Pronouns feature stopped")
 
     # Internal helpers -------------------------------------------------
     def _worker_loop(self) -> None:
@@ -158,6 +167,17 @@ class PronounsFeature:
             # this feature is usable out of the box without further
             # tuning. Values can be adjusted later or made configurable.
             self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
+            self._log(f"Shock delivered for pronoun violation; strength={self._shock_strength}")
         except Exception:
             # Never let PiShock errors break the feature loop.
+            return
+
+    def _log(self, message: str) -> None:
+        logger = self._logger
+        if logger is None:
+            return
+
+        try:
+            logger.log(message)
+        except Exception:
             return

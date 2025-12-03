@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Optional
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
+from logic.logging_utils import SessionLogManager
 from logic.pet.pronouns import PronounsFeature
 from logic.pet.pull import PullFeature
 from logic.trainer.focus import FocusFeature
@@ -21,6 +22,7 @@ class TrainerRuntime:
     osc: VRChatOSCInterface
     pishock: PiShockInterface
     whisper: WhisperInterface
+    logs: SessionLogManager
     features: List[Any] = field(default_factory=list)
 
 
@@ -31,6 +33,7 @@ class PetRuntime:
     osc: VRChatOSCInterface
     pishock: PiShockInterface
     whisper: WhisperInterface
+    logs: SessionLogManager
     features: List[Any] = field(default_factory=list)
 
 
@@ -50,7 +53,12 @@ def _apply_feature_flags(features: List[Any], feature_flags: Dict[type, bool]) -
 
 
 def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str]) -> TrainerRuntime:
-    osc = VRChatOSCInterface()
+    logs = SessionLogManager("trainer")
+
+    osc = VRChatOSCInterface(
+        log_all_events=logs.get_logger("osc_all.log").log,
+        log_relevant_events=logs.get_logger("osc_relevant.log").log,
+    )
 
     pishock = PiShockInterface(
         username=trainer_settings.get("pishock_username") or "",
@@ -72,6 +80,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
             whisper=whisper,
             difficulty=str(trainer_settings.get("difficulty") or "Normal"),
             names=trainer_settings.get("names") or [],
+            logger=logs.get_logger("focus_feature.log"),
         ),
         ProximityFeature(
             osc=osc,
@@ -79,6 +88,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
             whisper=whisper,
             difficulty=str(trainer_settings.get("difficulty") or "Normal"),
             names=trainer_settings.get("names") or [],
+            logger=logs.get_logger("proximity_feature.log"),
         ),
         TricksFeature(
             osc=osc,
@@ -86,6 +96,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
             whisper=whisper,
             names=trainer_settings.get("names") or [],
             difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+            logger=logs.get_logger("tricks_feature.log"),
         ),
         ScoldingFeature(
             osc=osc,
@@ -93,6 +104,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
             whisper=whisper,
             scolding_words=trainer_settings.get("scolding_words") or [],
             difficulty=str(trainer_settings.get("difficulty") or "Normal"),
+            logger=logs.get_logger("scolding_feature.log"),
         ),
     ]
 
@@ -110,11 +122,16 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
         if hasattr(feature, "start"):
             feature.start()
 
-    return TrainerRuntime(osc=osc, pishock=pishock, whisper=whisper, features=features)
+    return TrainerRuntime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
 
 
 def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> PetRuntime:
-    osc = VRChatOSCInterface()
+    logs = SessionLogManager("pet")
+
+    osc = VRChatOSCInterface(
+        log_all_events=logs.get_logger("osc_all.log").log,
+        log_relevant_events=logs.get_logger("osc_relevant.log").log,
+    )
 
     pishock = PiShockInterface(
         username=pet_settings.get("pishock_username") or "",
@@ -129,8 +146,8 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
     whisper.start()
 
     features: List[Any] = [
-        PullFeature(osc=osc, pishock=pishock, whisper=whisper),
-        PronounsFeature(osc=osc, pishock=pishock, whisper=whisper),
+        PullFeature(osc=osc, pishock=pishock, whisper=whisper, logger=logs.get_logger("pull_feature.log")),
+        PronounsFeature(osc=osc, pishock=pishock, whisper=whisper, logger=logs.get_logger("pronouns_feature.log")),
     ]
 
     _apply_feature_flags(
@@ -145,7 +162,7 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
         if hasattr(feature, "start"):
             feature.start()
 
-    return PetRuntime(osc=osc, pishock=pishock, whisper=whisper, features=features)
+    return PetRuntime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
 
 
 def start_trainer(trainer_settings: dict, input_device: Optional[str]) -> None:
