@@ -5,23 +5,24 @@ import time
 from typing import Iterable, List, Optional
 
 from interfaces.pishock import PiShockInterface
+from interfaces.server import DummyServerInterface
 from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.whisper import WhisperInterface
 from logic.logging_utils import LogFile
 
 
 class ScoldingFeature:
     """Pet scolding feature.
 
-    Listens for trainer scolding words via local Whisper and shocks the
-    pet when detected. Runs entirely on the pet client.
+    Listens for trainer scolding words forwarded from the trainer via the
+    server and shocks the pet when detected. Runs entirely on the pet
+    client.
     """
 
     def __init__(
         self,
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
-        whisper: WhisperInterface,
+        server: DummyServerInterface | None = None,
         *,
         scolding_words: Optional[Iterable[str]] = None,
         scaling: Optional[dict[str, float]] = None,
@@ -29,7 +30,7 @@ class ScoldingFeature:
     ) -> None:
         self.osc = osc
         self.pishock = pishock
-        self.whisper = whisper
+        self.server = server
         self._running = False
         self._enabled = True
         self._logger = logger
@@ -37,7 +38,6 @@ class ScoldingFeature:
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-        self._whisper_tag = "pet_scolding_feature"
         self._scolding_phrases: List[str] = self._normalise_phrases(scolding_words or [])
 
         self._base_cooldown_seconds: float = 3.0
@@ -63,11 +63,6 @@ class ScoldingFeature:
 
         self._running = True
         self._stop_event.clear()
-
-        try:
-            self.whisper.reset_tag(self._whisper_tag)
-        except Exception:
-            pass
 
         thread = threading.Thread(
             target=self._worker_loop,
@@ -113,36 +108,17 @@ class ScoldingFeature:
                     break
                 continue
 
-            try:
-                text = self.whisper.get_new_text(self._whisper_tag)
-            except Exception:
-                text = ""
-
-            if text and self._scolding_phrases:
-                if self._contains_scolding(text):
-                    now = time.time()
-                    if now >= self._cooldown_until:
-                        self._deliver_scolding_shock()
-                        self._cooldown_until = now + self._cooldown_seconds
+            if self._scolding_phrases and self._detect_remote_scold():
+                now = time.time()
+                if now >= self._cooldown_until:
+                    self._deliver_scolding_shock()
+                    self._cooldown_until = now + self._cooldown_seconds
 
             if self._stop_event.wait(0.5):
                 break
 
     def set_enabled(self, enabled: bool) -> None:
         self._enabled = bool(enabled)
-
-    def _contains_scolding(self, text: str) -> bool:
-        if not text:
-            return False
-
-        normalised = self._normalise(text)
-        if not normalised:
-            return False
-
-        for phrase in self._scolding_phrases:
-            if phrase and phrase in normalised:
-                return True
-        return False
 
     def _normalise_phrases(self, words: Iterable[str]) -> List[str]:
         return [self._normalise(word) for word in words if word and self._normalise(word)]
@@ -163,6 +139,36 @@ class ScoldingFeature:
 
         cleaned = "".join(chars)
         return " ".join(cleaned.split())
+
+    def _detect_remote_scold(self) -> bool:
+        if self.server is None:
+            return False
+
+        events = self.server.poll_events(
+            limit=5,
+            predicate=lambda evt: (
+                isinstance(evt, dict)
+                and isinstance(evt.get("payload"), dict)
+                and evt.get("payload", {}).get("type") == "scold"
+                and evt.get("payload", {}).get("meta", {}).get("feature") == "scolding"
+                and self._contains_scolding(evt.get("payload", {}).get("phrase", ""))
+            ),
+        )
+
+        return bool(events)
+
+    def _contains_scolding(self, text: str) -> bool:
+        if not text:
+            return False
+
+        normalised = self._normalise(text)
+        if not normalised:
+            return False
+
+        for phrase in self._scolding_phrases:
+            if phrase and phrase in normalised:
+                return True
+        return False
 
     def _deliver_scolding_shock(self) -> None:
         try:

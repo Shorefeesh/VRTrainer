@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from typing import Optional
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.whisper import WhisperInterface
 from interfaces.server import DummyServerInterface
 from logic.logging_utils import LogFile
 
@@ -21,16 +20,13 @@ class ProximityFeature:
         self,
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
-        whisper: WhisperInterface,
         server: DummyServerInterface | None = None,
         *,
         scaling: Optional[dict[str, float]] = None,
-        names: Optional[Iterable[str]] = None,
         logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
-        self.whisper = whisper
         self.server = server
         self._running = False
         self._enabled = True
@@ -63,10 +59,7 @@ class ProximityFeature:
             strength_scale=(scaling or {}).get("strength_scale", 1.0),
         )
 
-        # Whisper-driven summon commands.
-        self._whisper_tag = "pet_proximity_feature"
-        self._pet_names: List[str] = self._normalise_phrases(names or [])
-        self._default_command_phrases: List[str] = ["come here", "heel"]
+        # Summon command tracking triggered via the trainer/server path.
         self._base_command_timeout: float = 4.0
         self._command_timeout: float = self._base_command_timeout
         self._command_target: float = 1
@@ -81,11 +74,6 @@ class ProximityFeature:
 
         self._running = True
         self._stop_event.clear()
-
-        try:
-            self.whisper.reset_tag(self._whisper_tag)
-        except Exception:
-            pass
 
         import threading
 
@@ -141,12 +129,7 @@ class ProximityFeature:
                     break
                 continue
 
-            try:
-                text = self.whisper.get_new_text(self._whisper_tag)
-            except Exception:
-                text = ""
-
-            if text and self._detect_summon_command(text):
+            if self._detect_remote_summon():
                 self._pending_command_deadline = now + self._command_timeout
                 self._log("event=command_start feature=proximity runtime=pet name=summon")
 
@@ -203,45 +186,27 @@ class ProximityFeature:
         except Exception:
             return
 
-    def _detect_summon_command(self, text: str) -> bool:
-        normalised = self._normalise_text(text)
-        if not normalised:
+    def _detect_remote_summon(self) -> bool:
+        if self.server is None:
             return False
 
-        command_phrases = self._get_command_phrases()
-        if self._pet_names:
-            recent_chunks = self.whisper.get_recent_text_chunks(count=3)
-            recent_normalised = " ".join(self._normalise_text(chunk) for chunk in recent_chunks if chunk)
-            if not any(name in recent_normalised for name in self._pet_names):
-                return False
+        events = self.server.poll_events(
+            limit=5,
+            predicate=lambda evt: (
+                isinstance(evt, dict)
+                and isinstance(evt.get("payload"), dict)
+                and evt.get("payload", {}).get("type") == "command"
+                and evt.get("payload", {}).get("meta", {}).get("feature") == "proximity"
+            ),
+        )
 
-        return any(phrase in normalised for phrase in command_phrases)
+        return bool(events)
 
     def _meets_command_target(self, proximity_value: float | None = None) -> bool:
         proximity = (
             proximity_value if proximity_value is not None else self.osc.get_float_param("Trainer/Proximity", default=0.0)
         )
         return proximity >= self._command_target
-
-    @staticmethod
-    def _normalise_phrases(phrases: Iterable[str]) -> List[str]:
-        return [ProximityFeature._normalise_text(p) for p in phrases if ProximityFeature._normalise_text(p)]
-
-    @staticmethod
-    def _normalise_text(text: str) -> str:
-        if not text:
-            return ""
-
-        chars: List[str] = []
-        for ch in text.lower():
-            if ch.isalnum():
-                chars.append(ch)
-            elif ch.isspace():
-                chars.append(" ")
-            else:
-                chars.append(" ")
-
-        return " ".join("".join(chars).split())
 
     def _log(self, message: str) -> None:
         logger = self._logger
@@ -262,16 +227,3 @@ class ProximityFeature:
             f"event=sample feature=proximity runtime=pet value={proximity_value:.3f} threshold={self._proximity_threshold:.3f}"
         )
 
-    def _get_command_phrases(self) -> List[str]:
-        """Fetch latest trainer command words from the server, with fallback defaults."""
-        raw: List[str] = []
-        if self.server is not None:
-            try:
-                raw = self.server.get_setting("command_words", []) or []
-            except Exception:
-                raw = []
-
-        phrases = [self._normalise_text(word) for word in raw if self._normalise_text(word)]
-        if not phrases:
-            phrases = [self._normalise_text(word) for word in self._default_command_phrases]
-        return phrases
