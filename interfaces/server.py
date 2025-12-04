@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Any, Callable, MutableMapping
 import time
-import queue
+from collections import deque
 import uuid
 
 
@@ -29,7 +29,7 @@ class DummyServerInterface:
         self._session_events: list[str] = []
 
         self._outgoing: list[dict[str, Any]] = []
-        self._incoming: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
+        self._incoming: deque[dict[str, Any]] = deque()
         self._latest_settings: dict[str, Any] = {}
 
         self._username: str = "Anonymous"
@@ -131,12 +131,30 @@ class DummyServerInterface:
         self._rename_user(old_username, self._username)
 
     # Server → trainer polling ---------------------------------------
-    def poll_events(self, limit: int = 10) -> list[dict[str, Any]]:
-        """Return up to ``limit`` queued acknowledgements."""
-        events: list[dict[str, Any]] = []
-        while not self._incoming.empty() and len(events) < limit:
-            events.append(self._incoming.get_nowait())
-        return events
+    def poll_events(
+        self, limit: int = 10, *, predicate: Callable[[dict[str, Any]], bool] | None = None
+    ) -> list[dict[str, Any]]:
+        """Return up to ``limit`` queued acknowledgements.
+
+        When ``predicate`` is provided, only events that satisfy it are
+        returned; unmatched events are preserved for other consumers.
+        """
+
+        matched: list[dict[str, Any]] = []
+        unmatched: list[dict[str, Any]] = []
+
+        while self._incoming and len(matched) < limit:
+            item = self._incoming.popleft()
+            if predicate is None or predicate(item):
+                matched.append(item)
+            else:
+                unmatched.append(item)
+
+        if unmatched:
+            for item in reversed(unmatched):
+                self._incoming.appendleft(item)
+
+        return matched
 
     def get_setting(self, key: str, default: Any = None) -> Any:
         """Fetch the most recent setting pushed by the trainer."""
@@ -162,7 +180,7 @@ class DummyServerInterface:
             "status": "stubbed",
             "payload": payload,
         }
-        self._incoming.put(ack)
+        self._incoming.append(ack)
 
     def _log_message(self, msg: str) -> None:
         if self._log is not None:

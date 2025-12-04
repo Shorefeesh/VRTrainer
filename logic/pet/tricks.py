@@ -4,7 +4,7 @@ import time
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.whisper import WhisperInterface
+from interfaces.server import DummyServerInterface
 from logic.logging_utils import LogFile
 
 
@@ -28,7 +28,7 @@ class TricksFeature:
         self,
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
-        whisper: WhisperInterface,
+        server: DummyServerInterface | None = None,
         *,
         names: list[str] | None = None,
         scaling: dict[str, float] | None = None,
@@ -36,7 +36,7 @@ class TricksFeature:
     ) -> None:
         self.osc = osc
         self.pishock = pishock
-        self.whisper = whisper
+        self.server = server
         self._running = False
         self._enabled = True
         self._logger = logger
@@ -45,8 +45,6 @@ class TricksFeature:
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
-
-        self._whisper_tag = "pet_tricks_feature"
 
         self._pet_names = [self._normalise_text(name) for name in (names or []) if self._normalise_text(name)]
 
@@ -86,11 +84,6 @@ class TricksFeature:
 
         self._running = True
         self._stop_event.clear()
-
-        try:
-            self.whisper.reset_tag(self._whisper_tag)
-        except Exception:
-            pass
 
         import threading
 
@@ -143,20 +136,7 @@ class TricksFeature:
                     break
                 continue
 
-            try:
-                text = self.whisper.get_new_text(self._whisper_tag)
-            except Exception:
-                text = ""
-
-            detected = self._detect_command(text)
-            if detected is not None:
-                self._pending = _PendingCommand(
-                    name=detected,
-                    started_at=now,
-                    deadline=now + self._command_timeout,
-                )
-                self._log(f"event=command_start feature=tricks runtime=pet name={detected}")
-                self._deliver_task_start_signal()
+            self._maybe_start_command(now)
 
             if self._pending is not None:
                 if self._is_command_completed(self._pending.name):
@@ -178,27 +158,40 @@ class TricksFeature:
         if not self._enabled:
             self._pending = None
 
-    def _detect_command(self, text: str) -> str | None:
-        if not text:
-            return None
+    def _maybe_start_command(self, now: float) -> None:
+        """Start a new trick command if a trainer event was received."""
 
-        normalised = self._normalise_text(text)
-        if not normalised:
-            return None
+        if self.server is None:
+            return
 
-        if self._pet_names:
-            recent_chunks = self.whisper.get_recent_text_chunks(count=3)
-            recent_normalised = " ".join(
-                self._normalise_text(chunk) for chunk in recent_chunks if chunk
+        events = self.server.poll_events(
+            limit=5,
+            predicate=lambda evt: (
+                isinstance(evt, dict)
+                and isinstance(evt.get("payload"), dict)
+                and evt.get("payload", {}).get("type") == "command"
+                and evt.get("payload", {}).get("meta", {}).get("feature") == "tricks"
+            ),
+        )
+
+        for event in events:
+            payload = event.get("payload", {})
+            name = payload.get("phrase")
+            if not name:
+                continue
+
+            normalised = self._normalise_text(str(name))
+            if normalised not in self._command_phrases:
+                continue
+
+            self._pending = _PendingCommand(
+                name=normalised,
+                started_at=now,
+                deadline=now + self._command_timeout,
             )
-            if not any(name in recent_normalised for name in self._pet_names):
-                return None
-
-        for cmd, phrases in self._command_phrases.items():
-            for phrase in phrases:
-                if phrase and phrase in normalised:
-                    return cmd
-        return None
+            self._log(f"event=command_start feature=tricks runtime=pet name={normalised}")
+            self._deliver_task_start_signal()
+            break
 
     def _is_command_completed(self, command: str) -> bool:
         if command == "paw":
@@ -267,6 +260,8 @@ class TricksFeature:
         for ch in text.lower():
             if ch.isalnum():
                 chars.append(ch)
+            elif ch == "_":
+                chars.append("_")
             elif ch.isspace():
                 chars.append(" ")
             else:

@@ -1,10 +1,9 @@
 from __future__ import annotations
 
-from typing import Iterable, List, Optional
+from typing import Optional
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.whisper import WhisperInterface
 from interfaces.server import DummyServerInterface
 from logic.logging_utils import LogFile
 
@@ -20,16 +19,13 @@ class FocusFeature:
         self,
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
-        whisper: WhisperInterface,
         server: DummyServerInterface | None = None,
         *,
         scaling: Optional[dict[str, float]] = None,
-        names: Optional[Iterable[str]] = None,
         logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
-        self.whisper = whisper
         self.server = server
         self._running = False
         self._enabled = True
@@ -61,13 +57,7 @@ class FocusFeature:
         self._last_tick: float | None = None
         self._last_sample_log: float = 0.0
 
-        # Hearing the pet's name drains the meter even if OSC still says focused.
-        self._whisper_tag: str = "pet_focus_feature"
-        self._pet_names: List[str] = self._normalise_phrases(names or [])
         self._name_penalty: float = 0.15
-        # Trainer-provided command words (via server) can also be used
-        # to pull attention; fallback defaults are kept for robustness.
-        self._default_command_phrases: List[str] = ["come here", "heel"]
 
         self.set_scaling(
             delay_scale=1.0,
@@ -84,11 +74,6 @@ class FocusFeature:
 
         self._running = True
         self._stop_event.clear()
-
-        try:
-            self.whisper.reset_tag(self._whisper_tag)
-        except Exception:
-            pass
 
         import threading
 
@@ -144,7 +129,7 @@ class FocusFeature:
                     break
                 continue
 
-            self._apply_name_penalty()
+            self._apply_remote_penalties()
             self._update_meter(dt)
             self._log_sample(now)
 
@@ -163,32 +148,26 @@ class FocusFeature:
         delta = (self._fill_rate if focused else -self._drain_rate) * dt
         self._focus_meter = max(0.0, min(1.0, self._focus_meter + delta))
 
-    def _apply_name_penalty(self) -> None:
-        if not self._pet_names:
-            # Still honour trainer command words even if names list is empty.
-            pass
+    def _apply_remote_penalties(self) -> None:
+        """Apply penalties based on trainer-issued focus commands."""
 
-        try:
-            text = self.whisper.get_new_text(self._whisper_tag)
-        except Exception:
+        if self.server is None:
             return
 
-        if not text:
+        events = self.server.poll_events(
+            limit=5,
+            predicate=lambda evt: (
+                isinstance(evt, dict)
+                and isinstance(evt.get("payload"), dict)
+                and evt.get("payload", {}).get("type") == "command"
+                and evt.get("payload", {}).get("meta", {}).get("feature") == "focus"
+            ),
+        )
+
+        if not events:
             return
 
-        normalised = self._normalise(text)
-        if not normalised:
-            return
-
-        penalties: list[str] = []
-        if any(name in normalised for name in self._pet_names):
-            penalties.append("name")
-
-        command_words = self._get_command_phrases()
-        if any(cmd in normalised for cmd in command_words):
-            penalties.append("command_word")
-
-        if penalties:
+        for _ in events:
             self._focus_meter = max(0.0, self._focus_meter - self._name_penalty)
 
     def _should_shock(self, now: float) -> bool:
@@ -227,15 +206,11 @@ class FocusFeature:
         )
 
     @staticmethod
-    def _normalise_phrases(words: Iterable[str]) -> List[str]:
-        return [FocusFeature._normalise(word) for word in words if word and FocusFeature._normalise(word)]
-
-    @staticmethod
     def _normalise(text: str) -> str:
         if not text:
             return ""
 
-        chars: List[str] = []
+        chars: list[str] = []
         for ch in text.lower():
             if ch.isalnum():
                 chars.append(ch)
@@ -246,16 +221,3 @@ class FocusFeature:
 
         return " ".join("".join(chars).split())
 
-    def _get_command_phrases(self) -> List[str]:
-        """Fetch latest trainer command words from the server, with fallback defaults."""
-        raw = []
-        if self.server is not None:
-            try:
-                raw = self.server.get_setting("command_words", []) or []
-            except Exception:
-                raw = []
-
-        phrases = [self._normalise(word) for word in raw if self._normalise(word)]
-        if not phrases:
-            phrases = [self._normalise(word) for word in self._default_command_phrases]
-        return phrases

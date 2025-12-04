@@ -14,6 +14,10 @@ from logic.pet.proximity import ProximityFeature
 from logic.pet.pull import PullFeature
 from logic.pet.scolding import ScoldingFeature
 from logic.pet.tricks import TricksFeature
+from logic.trainer.focus import TrainerFocusFeature
+from logic.trainer.proximity import TrainerProximityFeature
+from logic.trainer.scolding import TrainerScoldingFeature
+from logic.trainer.tricks import TrainerTricksFeature
 
 
 @dataclass
@@ -161,9 +165,47 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
     except Exception:
         pass
 
-    # Trainer runtime currently holds only interfaces; feature logic
-    # now runs on the pet side.
-    features: List[Any] = []
+    features: List[Any] = [
+        TrainerFocusFeature(
+            whisper=whisper,
+            server=server,
+            names=trainer_settings.get("names") or [],
+            logger=logs.get_logger("trainer_focus_feature.log"),
+        ),
+        TrainerProximityFeature(
+            whisper=whisper,
+            server=server,
+            names=trainer_settings.get("names") or [],
+            logger=logs.get_logger("trainer_proximity_feature.log"),
+        ),
+        TrainerTricksFeature(
+            whisper=whisper,
+            server=server,
+            names=trainer_settings.get("names") or [],
+            logger=logs.get_logger("trainer_tricks_feature.log"),
+        ),
+        TrainerScoldingFeature(
+            whisper=whisper,
+            server=server,
+            scolding_words=trainer_settings.get("scolding_words") or [],
+            logger=logs.get_logger("trainer_scolding_feature.log"),
+        ),
+    ]
+
+    _apply_feature_flags(
+        features,
+        {
+            TrainerFocusFeature: bool(trainer_settings.get("feature_focus")),
+            TrainerProximityFeature: bool(trainer_settings.get("feature_proximity")),
+            TrainerTricksFeature: bool(trainer_settings.get("feature_tricks")),
+            TrainerScoldingFeature: bool(trainer_settings.get("feature_scolding")),
+        },
+    )
+
+    for feature in features:
+        if hasattr(feature, "start"):
+            feature.start()
+
     return TrainerRuntime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
 
 
@@ -197,25 +239,21 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
         FocusFeature(
             osc=osc,
             pishock=pishock,
-            whisper=whisper,
             server=server,
             scaling=scaling,
-            names=pet_settings.get("names") or [],
             logger=logs.get_logger("focus_feature.log"),
         ),
         ProximityFeature(
             osc=osc,
             pishock=pishock,
-            whisper=whisper,
             server=server,
             scaling=scaling,
-            names=pet_settings.get("names") or [],
             logger=logs.get_logger("proximity_feature.log"),
         ),
         TricksFeature(
             osc=osc,
             pishock=pishock,
-            whisper=whisper,
+            server=server,
             names=pet_settings.get("names") or [],
             scaling=scaling,
             logger=logs.get_logger("tricks_feature.log"),
@@ -223,7 +261,7 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
         ScoldingFeature(
             osc=osc,
             pishock=pishock,
-            whisper=whisper,
+            server=server,
             scolding_words=pet_settings.get("scolding_words") or [],
             scaling=scaling,
             logger=logs.get_logger("scolding_feature.log"),
@@ -271,7 +309,17 @@ def update_trainer_feature_states(trainer_settings: dict) -> None:
     runtime = _trainer_runtime
     if runtime is None:
         return
-    # Trainer currently has no feature logic; nothing to update.
+
+    _apply_feature_flags(
+        runtime.features,
+        {
+            TrainerFocusFeature: bool(trainer_settings.get("feature_focus")),
+            TrainerProximityFeature: bool(trainer_settings.get("feature_proximity")),
+            TrainerTricksFeature: bool(trainer_settings.get("feature_tricks")),
+            TrainerScoldingFeature: bool(trainer_settings.get("feature_scolding")),
+        },
+    )
+
     server = _ensure_server(role="trainer")
     try:
         server.send_settings(trainer_settings)
