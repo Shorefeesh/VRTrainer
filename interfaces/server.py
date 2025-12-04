@@ -31,6 +31,7 @@ class DummyServerInterface:
         self._outgoing: list[dict[str, Any]] = []
         self._incoming: deque[dict[str, Any]] = deque()
         self._latest_settings: dict[str, Any] = {}
+        self._user_stats: dict[str, deque[dict[str, Any]]] = {}
 
         self._username: str = "Anonymous"
         self._session_users: list[dict[str, str]] = []
@@ -69,12 +70,21 @@ class DummyServerInterface:
         self._record_outgoing(payload)
         self._enqueue_ack(payload)
 
+    def send_stats(self, stats: MutableMapping[str, Any]) -> None:
+        """Record pet stats tied to the current username."""
+
+        payload = {"type": "stats", "username": self._username, "data": dict(stats)}
+        self._record_outgoing(payload)
+        self._record_user_stats(payload)
+        self._enqueue_ack(payload)
+
     # Session management stubs ---------------------------------------
     def start_session(self, session_label: str | None = None) -> dict[str, Any]:
         """Simulate hosting a new session and return details."""
         self._session_id = session_label or f"session-{uuid.uuid4().hex[:8]}"
         self._session_state = "hosting"
         self._session_users = []
+        self._user_stats = {}
         self._add_or_update_user(self._username, self._role)
         self._ensure_pending_placeholder()
         self._record_session_event(f"started session {self._session_id}")
@@ -88,6 +98,7 @@ class DummyServerInterface:
 
         self._session_id = cleaned
         self._session_state = "joined"
+        self._user_stats = {}
         if not self._session_users:
             self._session_users = [
                 {"username": "Host", "status": "trainer"},
@@ -108,6 +119,7 @@ class DummyServerInterface:
         self._session_id = None
         self._session_state = "idle"
         self._session_users = []
+        self._user_stats = {}
         return self.get_session_details()
 
     def get_session_details(self) -> dict[str, Any]:
@@ -121,6 +133,7 @@ class DummyServerInterface:
             "latest_settings": dict(self._latest_settings),
             "events": list(self._session_events[-10:]),
             "session_users": [dict(user) for user in self._session_users],
+            "stats_by_user": {user: list(entries) for user, entries in self._user_stats.items()},
         }
 
     def set_username(self, username: str) -> None:
@@ -168,6 +181,16 @@ class DummyServerInterface:
     def _record_outgoing(self, payload: dict[str, Any]) -> None:
         self._outgoing.append(payload)
         self._log_message(f"queued {payload['type']} payload")
+
+    def _record_user_stats(self, payload: dict[str, Any]) -> None:
+        username = payload.get("username") or self._username or "Anonymous"
+        stats = payload.get("data")
+        if not isinstance(stats, dict):
+            return
+
+        entry = {"ts": time.time(), **stats}
+        bucket = self._user_stats.setdefault(username, deque(maxlen=50))
+        bucket.append(entry)
 
     def _enqueue_ack(self, payload: dict[str, Any]) -> None:
         if not self._connected:

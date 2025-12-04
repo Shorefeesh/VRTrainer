@@ -183,6 +183,17 @@ class ProximityFeature:
             self._log(
                 f"event=shock feature=proximity runtime=pet reason={reason.replace(' ', '_')} proximity={proximity:.3f} threshold={self._proximity_threshold:.3f} strength={strength}"
             )
+            self._send_stats(
+                {
+                    "event": "shock",
+                    "runtime": "pet",
+                    "feature": "proximity",
+                    "reason": reason,
+                    "proximity": proximity,
+                    "threshold": self._proximity_threshold,
+                    "strength": strength,
+                }
+            )
         except Exception:
             return
 
@@ -226,4 +237,23 @@ class ProximityFeature:
         self._log(
             f"event=sample feature=proximity runtime=pet value={proximity_value:.3f} threshold={self._proximity_threshold:.3f}"
         )
+        self._send_stats(
+            {
+                "event": "sample",
+                "runtime": "pet",
+                "feature": "proximity",
+                "value": proximity_value,
+                "threshold": self._proximity_threshold,
+            }
+        )
+
+    def _send_stats(self, stats: dict[str, object]) -> None:
+        server = self.server
+        if server is None:
+            return
+
+        try:
+            server.send_stats(stats)
+        except Exception:
+            return
 
