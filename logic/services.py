@@ -6,13 +6,14 @@ from typing import Any, Dict, List, Optional
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
+from interfaces.server import DummyServerInterface
 from logic.logging_utils import SessionLogManager
+from logic.pet.focus import FocusFeature
 from logic.pet.pronouns import PronounsFeature
+from logic.pet.proximity import ProximityFeature
 from logic.pet.pull import PullFeature
-from logic.trainer.focus import FocusFeature
-from logic.trainer.proximity import ProximityFeature
-from logic.trainer.scolding import ScoldingFeature
-from logic.trainer.tricks import TricksFeature
+from logic.pet.scolding import ScoldingFeature
+from logic.pet.tricks import TricksFeature
 
 
 @dataclass
@@ -39,6 +40,7 @@ class PetRuntime:
 
 _trainer_runtime: Optional[TrainerRuntime] = None
 _pet_runtime: Optional[PetRuntime] = None
+_server_interface: Optional[DummyServerInterface] = None
 
 
 def _apply_feature_flags(features: List[Any], feature_flags: Dict[type, bool]) -> None:
@@ -52,12 +54,52 @@ def _apply_feature_flags(features: List[Any], feature_flags: Dict[type, bool]) -
                 break
 
 
+def _apply_feature_scaling(features: List[Any], scaling: Dict[str, float]) -> None:
+    """Push scaling factors to all features that support runtime updates."""
+    for feature in features:
+        if hasattr(feature, "set_scaling"):
+            feature.set_scaling(
+                delay_scale=scaling.get("delay_scale", 1.0),
+                cooldown_scale=scaling.get("cooldown_scale", 1.0),
+                duration_scale=scaling.get("duration_scale", 1.0),
+                strength_scale=scaling.get("strength_scale", 1.0),
+            )
+
+
+def _extract_scaling(settings: Dict[str, Any]) -> Dict[str, float]:
+    """Clamp and normalise scaling values from settings dict."""
+    def _safe_scale(key: str) -> float:
+        try:
+            value = float(settings.get(key, 1.0))
+        except Exception:
+            value = 1.0
+        return max(0.0, min(2.0, value))
+
+    return {
+        "delay_scale": _safe_scale("delay_scale"),
+        "cooldown_scale": _safe_scale("cooldown_scale"),
+        "duration_scale": _safe_scale("duration_scale"),
+        "strength_scale": _safe_scale("strength_scale"),
+    }
+
+
+def _ensure_server(role: str = "trainer") -> DummyServerInterface:
+    """Create or return the shared dummy server interface."""
+    global _server_interface
+
+    if _server_interface is None:
+        _server_interface = DummyServerInterface(role=role)
+        _server_interface.start()
+    return _server_interface
+
+
 def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str]) -> TrainerRuntime:
     logs = SessionLogManager("trainer")
 
     osc = VRChatOSCInterface(
         log_all_events=logs.get_logger("osc_all.log").log,
         log_relevant_events=logs.get_logger("osc_relevant.log").log,
+        role="trainer",
     )
 
     pishock = PiShockInterface(
@@ -72,56 +114,15 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
     osc.start()
     pishock.start()
     whisper.start()
+    server = _ensure_server(role="trainer")
+    try:
+        server.send_settings(trainer_settings)
+    except Exception:
+        pass
 
-    features: List[Any] = [
-        FocusFeature(
-            osc=osc,
-            pishock=pishock,
-            whisper=whisper,
-            difficulty=str(trainer_settings.get("difficulty") or "Normal"),
-            names=trainer_settings.get("names") or [],
-            logger=logs.get_logger("focus_feature.log"),
-        ),
-        ProximityFeature(
-            osc=osc,
-            pishock=pishock,
-            whisper=whisper,
-            difficulty=str(trainer_settings.get("difficulty") or "Normal"),
-            names=trainer_settings.get("names") or [],
-            logger=logs.get_logger("proximity_feature.log"),
-        ),
-        TricksFeature(
-            osc=osc,
-            pishock=pishock,
-            whisper=whisper,
-            names=trainer_settings.get("names") or [],
-            difficulty=str(trainer_settings.get("difficulty") or "Normal"),
-            logger=logs.get_logger("tricks_feature.log"),
-        ),
-        ScoldingFeature(
-            osc=osc,
-            pishock=pishock,
-            whisper=whisper,
-            scolding_words=trainer_settings.get("scolding_words") or [],
-            difficulty=str(trainer_settings.get("difficulty") or "Normal"),
-            logger=logs.get_logger("scolding_feature.log"),
-        ),
-    ]
-
-    _apply_feature_flags(
-        features,
-        {
-            FocusFeature: bool(trainer_settings.get("feature_focus")),
-            ProximityFeature: bool(trainer_settings.get("feature_proximity")),
-            TricksFeature: bool(trainer_settings.get("feature_tricks")),
-            ScoldingFeature: bool(trainer_settings.get("feature_scolding")),
-        },
-    )
-
-    for feature in features:
-        if hasattr(feature, "start"):
-            feature.start()
-
+    # Trainer runtime currently holds only interfaces; feature logic
+    # now runs on the pet side.
+    features: List[Any] = []
     return TrainerRuntime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
 
 
@@ -131,6 +132,7 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
     osc = VRChatOSCInterface(
         log_all_events=logs.get_logger("osc_all.log").log,
         log_relevant_events=logs.get_logger("osc_relevant.log").log,
+        role="pet",
     )
 
     pishock = PiShockInterface(
@@ -145,18 +147,60 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
     pishock.start()
     whisper.start()
 
+    scaling = _extract_scaling(pet_settings)
+    server = _ensure_server(role="pet")
+
     features: List[Any] = [
         PullFeature(osc=osc, pishock=pishock, whisper=whisper, logger=logs.get_logger("pull_feature.log")),
         PronounsFeature(osc=osc, pishock=pishock, whisper=whisper, logger=logs.get_logger("pronouns_feature.log")),
+        FocusFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            server=server,
+            scaling=scaling,
+            names=pet_settings.get("names") or [],
+            logger=logs.get_logger("focus_feature.log"),
+        ),
+        ProximityFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            server=server,
+            scaling=scaling,
+            names=pet_settings.get("names") or [],
+            logger=logs.get_logger("proximity_feature.log"),
+        ),
+        TricksFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            names=pet_settings.get("names") or [],
+            scaling=scaling,
+            logger=logs.get_logger("tricks_feature.log"),
+        ),
+        ScoldingFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            scolding_words=pet_settings.get("scolding_words") or [],
+            scaling=scaling,
+            logger=logs.get_logger("scolding_feature.log"),
+        ),
     ]
 
     _apply_feature_flags(
         features,
         {
+            FocusFeature: bool(pet_settings.get("feature_focus")),
+            ProximityFeature: bool(pet_settings.get("feature_proximity")),
+            TricksFeature: bool(pet_settings.get("feature_tricks")),
+            ScoldingFeature: bool(pet_settings.get("feature_scolding")),
             PullFeature: bool(pet_settings.get("feature_ear_tail")),
             PronounsFeature: bool(pet_settings.get("feature_pronouns")),
         },
     )
+    _apply_feature_scaling(features, scaling)
 
     for feature in features:
         if hasattr(feature, "start"):
@@ -186,16 +230,12 @@ def update_trainer_feature_states(trainer_settings: dict) -> None:
     runtime = _trainer_runtime
     if runtime is None:
         return
-
-    _apply_feature_flags(
-        runtime.features,
-        {
-            FocusFeature: bool(trainer_settings.get("feature_focus")),
-            ProximityFeature: bool(trainer_settings.get("feature_proximity")),
-            TricksFeature: bool(trainer_settings.get("feature_tricks")),
-            ScoldingFeature: bool(trainer_settings.get("feature_scolding")),
-        },
-    )
+    # Trainer currently has no feature logic; nothing to update.
+    server = _ensure_server(role="trainer")
+    try:
+        server.send_settings(trainer_settings)
+    except Exception:
+        pass
 
 
 def stop_trainer() -> None:
@@ -236,9 +276,16 @@ def update_pet_feature_states(pet_settings: dict) -> None:
     if runtime is None:
         return
 
+    scaling = _extract_scaling(pet_settings)
+    _apply_feature_scaling(runtime.features, scaling)
+
     _apply_feature_flags(
         runtime.features,
         {
+            FocusFeature: bool(pet_settings.get("feature_focus")),
+            ProximityFeature: bool(pet_settings.get("feature_proximity")),
+            TricksFeature: bool(pet_settings.get("feature_tricks")),
+            ScoldingFeature: bool(pet_settings.get("feature_scolding")),
             PullFeature: bool(pet_settings.get("feature_ear_tail")),
             PronounsFeature: bool(pet_settings.get("feature_pronouns")),
         },
@@ -290,6 +337,7 @@ def get_trainer_pishock_status() -> Optional[Dict[str, Any]]:
 
     pishock = runtime.pishock
     return {
+        "enabled": getattr(pishock, "enabled", True),
         "connected": pishock.is_connected,
         "has_credentials": bool(getattr(pishock, "username", "") and getattr(pishock, "api_key", "")),
     }
@@ -311,6 +359,7 @@ def get_pet_pishock_status() -> Optional[Dict[str, Any]]:
 
     pishock = runtime.pishock
     return {
+        "enabled": getattr(pishock, "enabled", True),
         "connected": pishock.is_connected,
         "has_credentials": bool(getattr(pishock, "username", "") and getattr(pishock, "api_key", "")),
     }

@@ -16,10 +16,10 @@ class _PendingCommand:
 
 
 class TricksFeature:
-    """Trainer tricks feature.
+    """Pet tricks feature.
 
-    Listens for commands via Whisper and validates completion through
-    OSC parameters, applying shocks via PiShock if required.
+    Runs on the pet client: detects trainer-issued voice commands via
+    local Whisper and validates completion using OSC pose parameters.
     """
 
     def __init__(
@@ -29,7 +29,7 @@ class TricksFeature:
         whisper: WhisperInterface,
         *,
         names: list[str] | None = None,
-        difficulty: str | None = None,
+        scaling: dict[str, float] | None = None,
         logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
@@ -44,26 +44,29 @@ class TricksFeature:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        # Whisper tag so this feature only consumes its own transcript stream.
-        self._whisper_tag = "trainer_tricks_feature"
+        self._whisper_tag = "pet_tricks_feature"
 
-        # Names that must be present in a spoken command (if any are configured).
         self._pet_names = [self._normalise_text(name) for name in (names or []) if self._normalise_text(name)]
 
-        # Timing / strength tunables.
         self._poll_interval: float = 0.2
-        self._command_timeout: float = 5.0
-        self._cooldown_seconds: float = 2.0
+        self._base_command_timeout: float = 5.0
+        self._command_timeout: float = self._base_command_timeout
+        self._base_cooldown_seconds: float = 2.0
+        self._cooldown_seconds: float = self._base_cooldown_seconds
         self._cooldown_until: float = 0.0
-        self._shock_strength: int = 35
-        self._apply_difficulty(difficulty)
+        self._base_shock_strength: float = 35
+        self._shock_strength: float = self._base_shock_strength
+        self._base_shock_duration: float = 0.5
+        self._shock_duration: float = self._base_shock_duration
+        self.set_scaling(
+            delay_scale=(scaling or {}).get("delay_scale", 1.0),
+            cooldown_scale=(scaling or {}).get("cooldown_scale", 1.0),
+            duration_scale=(scaling or {}).get("duration_scale", 1.0),
+            strength_scale=(scaling or {}).get("strength_scale", 1.0),
+        )
 
-        # Active command state.
         self._pending: _PendingCommand | None = None
 
-        # Command vocabulary. Keys are internal names; values are lists
-        # of phrases that should trigger the command when paired with
-        # a pet name in speech.
         self._command_phrases: dict[str, list[str]] = {
             "paw": ["paw", "poor", "pour", "pore"],
             "sit": ["sit"],
@@ -73,7 +76,7 @@ class TricksFeature:
             "roll_over": ["rollover", "roll over"],
         }
 
-        self._log("event=init feature=tricks")
+        self._log("event=init feature=tricks runtime=pet")
 
     def start(self) -> None:
         if self._running:
@@ -85,20 +88,18 @@ class TricksFeature:
         try:
             self.whisper.reset_tag(self._whisper_tag)
         except Exception:
-            # Whisper may not be fully initialised; continue regardless.
             pass
 
         import threading
 
-        thread = threading.Thread(
+        thread = self._thread = threading.Thread(
             target=self._worker_loop,
-            name="TrainerTricksFeature",
+            name="PetTricksFeature",
             daemon=True,
         )
-        self._thread = thread
         thread.start()
 
-        self._log("event=start feature=tricks")
+        self._log("event=start feature=tricks runtime=pet")
 
     def stop(self) -> None:
         if not self._running:
@@ -112,23 +113,23 @@ class TricksFeature:
             thread.join(timeout=1.0)
         self._thread = None
 
-        self._log("event=stop feature=tricks")
+        self._log("event=stop feature=tricks runtime=pet")
 
     # Internal helpers -------------------------------------------------
-    def _apply_difficulty(self, difficulty: str | None) -> None:
-        """Adjust timing/strength based on difficulty label."""
-        level = (difficulty or "Normal").strip().lower()
-        if level == "easy":
-            self._command_timeout = 6.0
-            self._shock_strength = 25
-            self._cooldown_seconds = 3.0
-        elif level == "hard":
-            self._command_timeout = 4.0
-            self._shock_strength = 45
-            self._cooldown_seconds = 1.5
+    def set_scaling(
+        self,
+        *,
+        delay_scale: float = 1.0,
+        cooldown_scale: float = 1.0,
+        duration_scale: float = 1.0,
+        strength_scale: float = 1.0,
+    ) -> None:
+        self._command_timeout = max(0.0, self._base_command_timeout * delay_scale)
+        self._cooldown_seconds = max(0.0, self._base_cooldown_seconds * cooldown_scale)
+        self._shock_strength = max(0.0, self._base_shock_strength * strength_scale)
+        self._shock_duration = max(0.0, self._base_shock_duration * duration_scale)
 
     def _worker_loop(self) -> None:
-        """Main loop: read Whisper text, detect commands, check completion."""
         import time
 
         while not self._stop_event.is_set():
@@ -140,7 +141,6 @@ class TricksFeature:
                     break
                 continue
 
-            # Check for newly spoken commands.
             try:
                 text = self.whisper.get_new_text(self._whisper_tag)
             except Exception:
@@ -153,13 +153,12 @@ class TricksFeature:
                     started_at=now,
                     deadline=now + self._command_timeout,
                 )
-                self._log(f"event=command_start feature=tricks name={detected}")
+                self._log(f"event=command_start feature=tricks runtime=pet name={detected}")
 
-            # Evaluate the active command, if any.
             if self._pending is not None:
                 if self._is_command_completed(self._pending.name):
                     self._log(
-                        f"event=command_success feature=tricks name={self._pending.name} duration={now - self._pending.started_at:.2f}"
+                        f"event=command_success feature=tricks runtime=pet name={self._pending.name} duration={now - self._pending.started_at:.2f}"
                     )
                     self._pending = None
                 elif now >= self._pending.deadline and now >= self._cooldown_until:
@@ -171,14 +170,11 @@ class TricksFeature:
                 break
 
     def set_enabled(self, enabled: bool) -> None:
-        """Enable or disable command enforcement."""
-
         self._enabled = bool(enabled)
         if not self._enabled:
             self._pending = None
 
     def _detect_command(self, text: str) -> str | None:
-        """Return the internal command name if text contains name+command."""
         if not text:
             return None
 
@@ -186,9 +182,6 @@ class TricksFeature:
         if not normalised:
             return None
 
-        # Require a pet name match if any are configured, using a short
-        # look-back window to tolerate Whisper chunking that splits the
-        # name from the command phrase.
         if self._pet_names:
             recent_chunks = self.whisper.get_recent_text_chunks(count=3)
             recent_normalised = " ".join(
@@ -197,7 +190,6 @@ class TricksFeature:
             if not any(name in recent_normalised for name in self._pet_names):
                 return None
 
-        # Detect command phrases in the current text chunk(s).
         for cmd, phrases in self._command_phrases.items():
             for phrase in phrases:
                 if phrase and phrase in normalised:
@@ -205,7 +197,6 @@ class TricksFeature:
         return None
 
     def _is_command_completed(self, command: str) -> bool:
-        """Check OSC parameters to confirm a command was completed."""
         if command == "paw":
             return self.osc.get_bool_param("Trainer/Paw", default=False)
         elif command == "sit":
@@ -237,19 +228,17 @@ class TricksFeature:
         return False
 
     def _deliver_failure(self) -> None:
-        """Shock the pet for failing to perform the trick."""
         try:
-            self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
+            strength = int(self._shock_strength)
+            self.pishock.send_shock(strength=strength, duration=self._shock_duration)
             self._log(
-                f"event=shock feature=tricks name={self._pending.name if self._pending else 'unknown'} strength={self._shock_strength}"
+                f"event=shock feature=tricks runtime=pet name={self._pending.name if self._pending else 'unknown'} strength={strength}"
             )
         except Exception:
-            # Never let PiShock errors break the feature loop.
             return
 
     @staticmethod
     def _normalise_text(text: str) -> str:
-        """Lowercase and strip punctuation for loose matching."""
         if not text:
             return ""
 

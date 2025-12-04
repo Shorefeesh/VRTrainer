@@ -44,6 +44,63 @@ class LabeledCombobox(ttk.Frame):
         self.combobox["values"] = values
 
 
+class LabeledScale(ttk.Frame):
+    """A label with a horizontal scale and live value indicator."""
+
+    def __init__(
+        self,
+        master,
+        text: str,
+        *,
+        from_: float = 0.0,
+        to: float = 2.0,
+        resolution: float = 0.05,
+        initial: float = 1.0,
+    ) -> None:
+        super().__init__(master)
+
+        self.variable = tk.DoubleVar(value=initial)
+
+        label = ttk.Label(self, text=text)
+        label.grid(row=0, column=0, sticky="w", padx=(0, 8))
+
+        self.scale = ttk.Scale(
+            self,
+            variable=self.variable,
+            from_=from_,
+            to=to,
+            orient="horizontal",
+        )
+        self.scale.grid(row=0, column=1, sticky="ew")
+
+        self.value_label = ttk.Label(self, width=6, anchor="e")
+        self.value_label.grid(row=0, column=2, sticky="e", padx=(8, 0))
+
+        self.columnconfigure(1, weight=1)
+
+        # Keep the displayed multiplier in sync.
+        self.variable.trace_add("write", lambda *_: self._update_value_label())
+        self._update_value_label()
+
+        # Enforce step size manually because ttk.Scale does not support resolution.
+        def _snap_to_resolution(value: float) -> float:
+            step = resolution
+            if step <= 0:
+                return value
+            snapped = round(value / step) * step
+            return max(from_, min(to, snapped))
+
+        def _on_move(*_) -> None:
+            snapped = _snap_to_resolution(self.variable.get())
+            if snapped != self.variable.get():
+                self.variable.set(snapped)
+
+        self.scale.configure(command=lambda _val: _on_move())
+
+    def _update_value_label(self) -> None:
+        self.value_label.configure(text=f"{self.variable.get():.2f}x")
+
+
 class LabeledCheckbutton(ttk.Frame):
     """A single checkbutton with its own BooleanVar."""
 
@@ -221,6 +278,10 @@ def update_osc_status_indicator(
 ) -> None:
     """Update the VRChat OSC status line with live diagnostics."""
     if not is_running:
+        return
+
+    if osc_status.get("enabled") is False:
+        status_indicator.set_status("Disabled (handled on pet side)", "grey")
         return
 
     messages = osc_status.get("messages_last_10s", 0)

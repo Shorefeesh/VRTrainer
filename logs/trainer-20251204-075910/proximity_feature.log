@@ -1,0 +1,24 @@
+[2025-12-04 07:59:18.368] event=init feature=proximity
+[2025-12-04 07:59:18.370] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:18.370] event=start feature=proximity
+[2025-12-04 07:59:19.453] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:20.553] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:21.658] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:22.750] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:23.846] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:24.936] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:26.035] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:27.130] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:28.234] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:29.327] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:30.425] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:31.524] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:32.622] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:33.714] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:34.808] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:35.902] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:36.994] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:38.089] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:39.183] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:40.272] event=sample feature=proximity value=1.000 threshold=0.400
+[2025-12-04 07:59:40.843] event=stop feature=proximity

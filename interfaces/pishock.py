@@ -30,6 +30,10 @@ class PiShockInterface:
 
         # Normalise role so unexpected values fall back to trainer
         self._role = "pet" if role == "pet" else "trainer"
+        # Only the pet runtime should ever drive the real PiShock/OSC
+        # outputs. On the trainer side, the interface remains inert and
+        # relies on server-mediated actions instead.
+        self._enabled: bool = self._role == "pet"
 
         self._connected: bool = False
         self._api: Optional[pishock.PiShockAPI] = None
@@ -49,6 +53,13 @@ class PiShockInterface:
 
     def start(self) -> None:
         """Initialise the PiShock API client and validate credentials."""
+        if not self._enabled:
+            # Trainer side: intentionally skip PiShock initialisation.
+            self._connected = False
+            self._api = None
+            self._shocker = None
+            return
+
         if not self.username or not self.api_key:
             # Treat missing credentials as "not connected" but do not fail hard.
             self._connected = False
@@ -80,7 +91,11 @@ class PiShockInterface:
 
     @property
     def is_connected(self) -> bool:
-        return self._connected
+        return self._enabled and self._connected
+
+    @property
+    def enabled(self) -> bool:
+        return self._enabled
 
     def send_shock(
         self,
@@ -103,6 +118,9 @@ class PiShockInterface:
         This method is safe to call even when PiShock is not configured
         yet; in that case it simply returns without raising.
         """
+        if not self._enabled:
+            return
+
         # Always emit an OSC parameter so the avatars can react visually
         # to shocks, even if the PiShock API itself is not configured
         # or connected.

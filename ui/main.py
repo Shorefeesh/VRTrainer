@@ -58,11 +58,46 @@ def build_ui(root: tk.Tk) -> None:
         save_config(config)
         if services.is_trainer_running():
             services.update_trainer_feature_states(settings)
+        # Mirror trainer-controlled pet feature toggles into the pet tab and running pet runtime.
+        pet_tab.set_feature_flags(
+            feature_focus=settings.get("feature_focus", False),
+            feature_proximity=settings.get("feature_proximity", False),
+            feature_tricks=settings.get("feature_tricks", False),
+            feature_scolding=settings.get("feature_scolding", False),
+            feature_ear_tail=settings.get("feature_ear_tail", False),
+            feature_pronouns=settings.get("feature_pronouns", False),
+        )
+        if services.is_pet_running():
+            services.update_pet_feature_states(
+                {
+                    "feature_focus": settings.get("feature_focus"),
+                    "feature_proximity": settings.get("feature_proximity"),
+                    "feature_tricks": settings.get("feature_tricks"),
+                    "feature_scolding": settings.get("feature_scolding"),
+                    "feature_ear_tail": settings.get("feature_ear_tail"),
+                    "feature_pronouns": settings.get("feature_pronouns"),
+                    "delay_scale": settings.get("delay_scale"),
+                    "cooldown_scale": settings.get("cooldown_scale"),
+                    "duration_scale": settings.get("duration_scale"),
+                    "strength_scale": settings.get("strength_scale"),
+                    "names": settings.get("names"),
+                    "command_words": settings.get("command_words"),
+                    "scolding_words": settings.get("scolding_words"),
+                }
+            )
 
     def on_trainer_profile_selected(profile_name: str) -> None:
         if not profile_name:
             trainer_profile.set_active_profile_name(config, None)
             save_config(config)
+            pet_tab.set_feature_flags(
+                feature_focus=False,
+                feature_proximity=False,
+                feature_tricks=False,
+                feature_scolding=False,
+                feature_ear_tail=False,
+                feature_pronouns=False,
+            )
             return
 
         trainer_profile.set_active_profile_name(config, profile_name)
@@ -71,6 +106,14 @@ def build_ui(root: tk.Tk) -> None:
             current = trainer_profile.default_profile_settings(profile_name)
             trainer_profile.update_profile_from_settings(config, current)
         trainer_tab.apply_profile_settings(current)
+        pet_tab.set_feature_flags(
+            feature_focus=current.get("feature_focus", False),
+            feature_proximity=current.get("feature_proximity", False),
+            feature_tricks=current.get("feature_tricks", False),
+            feature_scolding=current.get("feature_scolding", False),
+            feature_ear_tail=current.get("feature_ear_tail", False),
+            feature_pronouns=current.get("feature_pronouns", False),
+        )
         save_config(config)
 
     def on_trainer_profile_renamed(old_name: str, new_name: str) -> None:
@@ -117,13 +160,30 @@ def build_ui(root: tk.Tk) -> None:
     def on_pet_settings_changed(settings: dict) -> None:
         config["pet"] = dict(settings)
         save_config(config)
-        if services.is_pet_running():
-            services.update_pet_feature_states(settings)
 
     def on_pet_start(running: bool) -> None:
         """Callback for when the Pet tab Start/Stop button is toggled."""
         if running:
             pet_settings = pet_tab.collect_settings()
+            trainer_settings = trainer_tab.collect_settings()
+            # Copy trainer-controlled feature toggles and vocab to the pet runtime.
+            pet_settings.update(
+                {
+                    "feature_focus": trainer_settings.get("feature_focus"),
+                    "feature_proximity": trainer_settings.get("feature_proximity"),
+                    "feature_tricks": trainer_settings.get("feature_tricks"),
+                    "feature_scolding": trainer_settings.get("feature_scolding"),
+                    "feature_ear_tail": trainer_settings.get("feature_ear_tail"),
+                    "feature_pronouns": trainer_settings.get("feature_pronouns"),
+                    "delay_scale": trainer_settings.get("delay_scale"),
+                    "cooldown_scale": trainer_settings.get("cooldown_scale"),
+                    "duration_scale": trainer_settings.get("duration_scale"),
+                    "strength_scale": trainer_settings.get("strength_scale"),
+                    "names": trainer_settings.get("names"),
+                    "command_words": trainer_settings.get("command_words"),
+                    "scolding_words": trainer_settings.get("scolding_words"),
+                }
+            )
             input_device = settings_tab.input_device
             services.start_pet(pet_settings, input_device)
         else:
@@ -135,6 +195,16 @@ def build_ui(root: tk.Tk) -> None:
     pet_settings_conf = config.get("pet") or {}
     if pet_settings_conf:
         pet_tab.apply_settings(pet_settings_conf)
+    # Keep pet feature status aligned with the currently active trainer profile.
+    current_trainer_settings = trainer_tab.collect_settings()
+    pet_tab.set_feature_flags(
+        feature_focus=current_trainer_settings.get("feature_focus", False),
+        feature_proximity=current_trainer_settings.get("feature_proximity", False),
+        feature_tricks=current_trainer_settings.get("feature_tricks", False),
+        feature_scolding=current_trainer_settings.get("feature_scolding", False),
+        feature_ear_tail=current_trainer_settings.get("feature_ear_tail", False),
+        feature_pronouns=current_trainer_settings.get("feature_pronouns", False),
+    )
 
     stats_tab = StatsTab(notebook)
 
@@ -158,7 +228,9 @@ def build_ui(root: tk.Tk) -> None:
         # PiShock status
         trainer_pishock = services.get_trainer_pishock_status()
         if trainer_pishock is not None:
-            if trainer_pishock["connected"]:
+            if not trainer_pishock.get("enabled", True):
+                trainer_tab.pishock_status.set_status("Disabled (pet-side only)", "grey")
+            elif trainer_pishock["connected"]:
                 trainer_tab.pishock_status.set_status("Connected", "green")
             elif trainer_pishock["has_credentials"]:
                 trainer_tab.pishock_status.set_status("Not connected", "red")
@@ -167,7 +239,9 @@ def build_ui(root: tk.Tk) -> None:
 
         pet_pishock = services.get_pet_pishock_status()
         if pet_pishock is not None:
-            if pet_pishock["connected"]:
+            if not pet_pishock.get("enabled", True):
+                pet_tab.pishock_status.set_status("Disabled (pet-side only)", "grey")
+            elif pet_pishock["connected"]:
                 pet_tab.pishock_status.set_status("Connected", "green")
             elif pet_pishock["has_credentials"]:
                 pet_tab.pishock_status.set_status("Not connected", "red")

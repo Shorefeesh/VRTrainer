@@ -16,6 +16,8 @@ class VRChatOSCInterface:
         self,
         log_all_events: Callable[[str], None] | None = None,
         log_relevant_events: Callable[[str], None] | None = None,
+        *,
+        role: str = "pet",
     ) -> None:
         from collections import deque
         import threading
@@ -23,6 +25,12 @@ class VRChatOSCInterface:
         self._running = False
         self._host = "127.0.0.1"
         self._port = 9001
+
+        # Only the pet runtime should attach to VRChat OSC. The trainer
+        # receives data through the server instead of binding a local
+        # OSC port.
+        self._role = "pet" if role == "pet" else "trainer"
+        self._enabled = self._role == "pet"
 
         self._lock = threading.Lock()
         self._message_times = deque()
@@ -55,6 +63,12 @@ class VRChatOSCInterface:
     def start(self) -> None:
         """Start OSC handling and begin listening on localhost:9001."""
         if self._running:
+            return
+
+        if not self._enabled:
+            # Trainer side: skip binding the OSC server entirely.
+            self._running = False
+            self._log_message(self._log_relevant_events, "OSC listener disabled on trainer runtime")
             return
 
         try:
@@ -154,6 +168,7 @@ class VRChatOSCInterface:
         missing_pet = sorted(expected_pet - seen_pet)
 
         return {
+            "enabled": self._enabled,
             "messages_last_10s": messages_last_10s,
             "expected_trainer_params_total": len(expected_trainer),
             "found_trainer_params": found_trainer,
@@ -165,7 +180,7 @@ class VRChatOSCInterface:
 
     @property
     def is_running(self) -> bool:
-        return self._running
+        return self._enabled and self._running
 
     # Parameter access -------------------------------------------------
     def get_parameter(self, name: str, default: object | None = None) -> object | None:

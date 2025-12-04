@@ -11,10 +11,10 @@ from logic.logging_utils import LogFile
 
 
 class ScoldingFeature:
-    """Trainer scolding feature.
+    """Pet scolding feature.
 
-    Detects scolding words spoken by the trainer via Whisper and uses
-    PiShock to deliver feedback.
+    Listens for trainer scolding words via local Whisper and shocks the
+    pet when detected. Runs entirely on the pet client.
     """
 
     def __init__(
@@ -24,7 +24,7 @@ class ScoldingFeature:
         whisper: WhisperInterface,
         *,
         scolding_words: Optional[Iterable[str]] = None,
-        difficulty: Optional[str] = None,
+        scaling: Optional[dict[str, float]] = None,
         logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
@@ -34,28 +34,28 @@ class ScoldingFeature:
         self._enabled = True
         self._logger = logger
 
-        # Background worker thread that consumes Whisper transcripts.
         self._thread: Optional[threading.Thread] = None
         self._stop_event = threading.Event()
 
-        # Tag used when reading from Whisper so this feature has an
-        # independent view of the transcript.
-        self._whisper_tag = "trainer_scolding_feature"
-
-        # Preprocess scolding phrases for case-insensitive, punctuation-
-        # insensitive matching.
+        self._whisper_tag = "pet_scolding_feature"
         self._scolding_phrases: List[str] = self._normalise_phrases(scolding_words or [])
 
-        # Cooldown between shocks so a long sentence containing
-        # multiple scolding phrases does not spam PiShock.
-        self._cooldown_seconds: float = 3.0
+        self._base_cooldown_seconds: float = 3.0
+        self._cooldown_seconds: float = self._base_cooldown_seconds
         self._cooldown_until: float = 0.0
 
-        # Shock strength can be tuned by difficulty.
-        self._shock_strength: int = 30
-        self._apply_difficulty(difficulty)
+        self._base_shock_strength: float = 30
+        self._shock_strength: float = self._base_shock_strength
+        self._base_shock_duration: float = 0.5
+        self._shock_duration: float = self._base_shock_duration
+        self.set_scaling(
+            delay_scale=(scaling or {}).get("delay_scale", 1.0),
+            cooldown_scale=(scaling or {}).get("cooldown_scale", 1.0),
+            duration_scale=(scaling or {}).get("duration_scale", 1.0),
+            strength_scale=(scaling or {}).get("strength_scale", 1.0),
+        )
 
-        self._log("event=init feature=scolding")
+        self._log("event=init feature=scolding runtime=pet")
 
     def start(self) -> None:
         if self._running:
@@ -64,23 +64,20 @@ class ScoldingFeature:
         self._running = True
         self._stop_event.clear()
 
-        # Ensure we only see future transcript text.
         try:
             self.whisper.reset_tag(self._whisper_tag)
         except Exception:
-            # If Whisper is not fully initialised, continue anyway; the
-            # worker loop will simply see empty text.
             pass
 
         thread = threading.Thread(
             target=self._worker_loop,
-            name="TrainerScoldingFeature",
+            name="PetScoldingFeature",
             daemon=True,
         )
         self._thread = thread
         thread.start()
 
-        self._log("event=start feature=scolding")
+        self._log("event=start feature=scolding runtime=pet")
 
     def stop(self) -> None:
         if not self._running:
@@ -94,21 +91,22 @@ class ScoldingFeature:
             thread.join(timeout=1.0)
         self._thread = None
 
-        self._log("event=stop feature=scolding")
+        self._log("event=stop feature=scolding runtime=pet")
 
     # Internal helpers -------------------------------------------------
-    def _apply_difficulty(self, difficulty: Optional[str]) -> None:
-        """Configure shock strength/cooldown based on difficulty label."""
-        level = (difficulty or "Normal").strip().lower()
-        if level == "easy":
-            self._shock_strength = 20
-            self._cooldown_seconds = 5.0
-        elif level == "hard":
-            self._shock_strength = 40
-            self._cooldown_seconds = 2.0
+    def set_scaling(
+        self,
+        *,
+        delay_scale: float = 1.0,
+        cooldown_scale: float = 1.0,
+        duration_scale: float = 1.0,
+        strength_scale: float = 1.0,
+    ) -> None:
+        self._cooldown_seconds = max(0.0, self._base_cooldown_seconds * cooldown_scale)
+        self._shock_strength = max(0.0, self._base_shock_strength * strength_scale)
+        self._shock_duration = max(0.0, self._base_shock_duration * duration_scale)
 
     def _worker_loop(self) -> None:
-        """Background loop that watches Whisper transcripts."""
         while not self._stop_event.is_set():
             if not self._enabled:
                 if self._stop_event.wait(0.5):
@@ -127,18 +125,13 @@ class ScoldingFeature:
                         self._deliver_scolding_shock()
                         self._cooldown_until = now + self._cooldown_seconds
 
-            # Sleep briefly to limit CPU usage while still reacting
-            # quickly to new speech.
             if self._stop_event.wait(0.5):
                 break
 
     def set_enabled(self, enabled: bool) -> None:
-        """Enable or disable scolding detection."""
-
         self._enabled = bool(enabled)
 
     def _contains_scolding(self, text: str) -> bool:
-        """Return True if the text includes any configured scolding phrase."""
         if not text:
             return False
 
@@ -152,12 +145,10 @@ class ScoldingFeature:
         return False
 
     def _normalise_phrases(self, words: Iterable[str]) -> List[str]:
-        """Normalise configured phrases for matching."""
         return [self._normalise(word) for word in words if word and self._normalise(word)]
 
     @staticmethod
     def _normalise(text: str) -> str:
-        """Normalise text for case- and punctuation-insensitive search."""
         if not text:
             return ""
 
@@ -168,21 +159,17 @@ class ScoldingFeature:
             elif ch.isspace():
                 chars.append(" ")
             else:
-                # Replace punctuation with spaces so multi-word phrases
-                # like "bad fox!" still match "Bad fox".
                 chars.append(" ")
 
         cleaned = "".join(chars)
-        # Collapse multiple whitespace into single spaces and trim.
         return " ".join(cleaned.split())
 
     def _deliver_scolding_shock(self) -> None:
-        """Trigger a corrective shock via PiShock."""
         try:
-            self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
-            self._log(f"event=shock feature=scolding strength={self._shock_strength}")
+            strength = int(self._shock_strength)
+            self.pishock.send_shock(strength=strength, duration=self._shock_duration)
+            self._log(f"event=shock feature=scolding runtime=pet strength={strength}")
         except Exception:
-            # Never let PiShock errors break the feature loop.
             return
 
     def _log(self, message: str) -> None:

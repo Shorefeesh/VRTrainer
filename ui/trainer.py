@@ -5,6 +5,7 @@ from .shared import (
     LabeledEntry,
     LabeledCheckbutton,
     LabeledCombobox,
+    LabeledScale,
     StatusIndicator,
     ScrollableFrame,
     create_features_frame,
@@ -43,7 +44,7 @@ class TrainerTab(ScrollableFrame):
         self._build_pishock_section()
         self._build_features_section()
         self._build_word_lists_section()
-        self._build_difficulty_section()
+        self._build_scaling_section()
         self._build_controls_section()
 
         for col in range(2):
@@ -172,12 +173,19 @@ class TrainerTab(ScrollableFrame):
     def _build_features_section(self) -> None:
         frame, features = create_features_frame(
             self.container,
-            ["Focus", "Proximity", "Tricks", "Scolding"],
+            ["Focus", "Proximity", "Tricks", "Scolding", "Ear/Tail pull", "Pronouns"],
         )
         frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
         self._detail_frames.append(frame)
 
-        self.feature_focus, self.feature_proximity, self.feature_tricks, self.feature_scolding = features
+        (
+            self.feature_focus,
+            self.feature_proximity,
+            self.feature_tricks,
+            self.feature_scolding,
+            self.feature_ear_tail,
+            self.feature_pronouns,
+        ) = features
 
         for feature in features:
             feature.variable.trace_add("write", self._on_any_setting_changed)
@@ -222,17 +230,28 @@ class TrainerTab(ScrollableFrame):
         scolding_scroll.grid(row=0, column=1, sticky="ns")
         self.scolding_words_text.bind("<FocusOut>", self._on_any_setting_changed)
 
-    # Difficulty ---------------------------------------------------------
-    def _build_difficulty_section(self) -> None:
-        frame = ttk.LabelFrame(self.container, text="Difficulty")
+    # Scaling ------------------------------------------------------------
+    def _build_scaling_section(self) -> None:
+        frame = ttk.LabelFrame(self.container, text="Scaling")
         frame.grid(row=4, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
         frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
         self._detail_frames.append(frame)
 
-        self.difficulty_row = LabeledCombobox(frame, "Level", values=["Easy", "Normal", "Hard"])
-        self.difficulty_row.variable.set("Normal")
-        self.difficulty_row.grid(row=0, column=0, sticky="ew")
-        self.difficulty_row.variable.trace_add("write", self._on_any_setting_changed)
+        self.delay_scale = LabeledScale(frame, "Delay scale", from_=0.0, to=2.0, resolution=0.05, initial=1.0)
+        self.delay_scale.grid(row=0, column=0, sticky="ew", padx=(0, 6), pady=(0, 4))
+
+        self.cooldown_scale = LabeledScale(frame, "Cooldown scale", from_=0.0, to=2.0, resolution=0.05, initial=1.0)
+        self.cooldown_scale.grid(row=0, column=1, sticky="ew", padx=(6, 0), pady=(0, 4))
+
+        self.duration_scale = LabeledScale(frame, "Duration scale", from_=0.0, to=2.0, resolution=0.05, initial=1.0)
+        self.duration_scale.grid(row=1, column=0, sticky="ew", padx=(0, 6))
+
+        self.strength_scale = LabeledScale(frame, "Strength scale", from_=0.0, to=2.0, resolution=0.05, initial=1.0)
+        self.strength_scale.grid(row=1, column=1, sticky="ew", padx=(6, 0))
+
+        for scale in (self.delay_scale, self.cooldown_scale, self.duration_scale, self.strength_scale):
+            scale.variable.trace_add("write", self._on_any_setting_changed)
 
     # Controls + status --------------------------------------------------
     def _build_controls_section(self) -> None:
@@ -266,7 +285,12 @@ class TrainerTab(ScrollableFrame):
             "feature_proximity": self.feature_proximity.variable.get(),
             "feature_tricks": self.feature_tricks.variable.get(),
             "feature_scolding": self.feature_scolding.variable.get(),
-            "difficulty": self.difficulty_row.variable.get(),
+            "feature_ear_tail": self.feature_ear_tail.variable.get(),
+            "feature_pronouns": self.feature_pronouns.variable.get(),
+            "delay_scale": float(self.delay_scale.variable.get()),
+            "cooldown_scale": float(self.cooldown_scale.variable.get()),
+            "duration_scale": float(self.duration_scale.variable.get()),
+            "strength_scale": float(self.strength_scale.variable.get()),
             "names": self._get_words_from_text(self.names_text),
             "scolding_words": self._get_words_from_text(self.scolding_words_text),
         }
@@ -283,7 +307,12 @@ class TrainerTab(ScrollableFrame):
                 self.feature_proximity.variable.set(False)
                 self.feature_tricks.variable.set(False)
                 self.feature_scolding.variable.set(False)
-                self.difficulty_row.variable.set("Normal")
+                self.feature_ear_tail.variable.set(False)
+                self.feature_pronouns.variable.set(False)
+                self.delay_scale.variable.set(1.0)
+                self.cooldown_scale.variable.set(1.0)
+                self.duration_scale.variable.set(1.0)
+                self.strength_scale.variable.set(1.0)
                 self._set_words_text(self.names_text, [])
                 self._set_words_text(self.scolding_words_text, [])
             else:
@@ -298,7 +327,18 @@ class TrainerTab(ScrollableFrame):
                 self.feature_proximity.variable.set(bool(settings.get("feature_proximity")))
                 self.feature_tricks.variable.set(bool(settings.get("feature_tricks")))
                 self.feature_scolding.variable.set(bool(settings.get("feature_scolding")))
-                self.difficulty_row.variable.set(settings.get("difficulty") or "Normal")
+                self.feature_ear_tail.variable.set(bool(settings.get("feature_ear_tail")))
+                self.feature_pronouns.variable.set(bool(settings.get("feature_pronouns")))
+
+                delay_scale = settings.get("delay_scale")
+                cooldown_scale = settings.get("cooldown_scale")
+                duration_scale = settings.get("duration_scale")
+                strength_scale = settings.get("strength_scale")
+
+                self.delay_scale.variable.set(float(delay_scale if delay_scale is not None else 1.0))
+                self.cooldown_scale.variable.set(float(cooldown_scale if cooldown_scale is not None else 1.0))
+                self.duration_scale.variable.set(float(duration_scale if duration_scale is not None else 1.0))
+                self.strength_scale.variable.set(float(strength_scale if strength_scale is not None else 1.0))
                 self._set_words_text(self.names_text, settings.get("names", []))
                 self._set_words_text(self.scolding_words_text, settings.get("scolding_words", []))
         finally:

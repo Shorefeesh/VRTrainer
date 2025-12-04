@@ -3,7 +3,6 @@ from tkinter import ttk
 
 from .shared import (
     ScrollableFrame,
-    create_features_frame,
     create_pishock_credentials_frame,
     create_running_status_frame,
     update_running_state_ui,
@@ -20,9 +19,14 @@ class PetTab(ScrollableFrame):
         self.on_start = on_start
         self._suppress_callbacks = False
         self._is_running = False
+        self._feature_focus_enabled = False
+        self._feature_proximity_enabled = False
+        self._feature_tricks_enabled = False
+        self._feature_scolding_enabled = False
+        self._feature_ear_tail_enabled = False
+        self._feature_pronouns_enabled = False
 
         self._build_pishock_section()
-        self._build_features_section()
         self._build_controls_section()
 
         self.container.columnconfigure(0, weight=1)
@@ -34,18 +38,9 @@ class PetTab(ScrollableFrame):
         self.pishock_username.variable.trace_add("write", self._on_any_setting_changed)
         self.pishock_api_key.variable.trace_add("write", self._on_any_setting_changed)
 
-    def _build_features_section(self) -> None:
-        frame, features = create_features_frame(self.container, ["Ear/Tail pull", "Pronouns"])
-        frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=12)
-
-        self.feature_ear_tail, self.feature_pronouns = features
-
-        self.feature_ear_tail.variable.trace_add("write", self._on_any_setting_changed)
-        self.feature_pronouns.variable.trace_add("write", self._on_any_setting_changed)
-
     def _build_controls_section(self) -> None:
         control_frame = ttk.Frame(self.container)
-        control_frame.grid(row=2, column=0, sticky="nsew", padx=12, pady=(0, 12))
+        control_frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(0, 12))
         control_frame.columnconfigure(0, weight=1)
 
         self.start_button = ttk.Button(control_frame, text="Start", command=self._toggle_start)
@@ -68,8 +63,6 @@ class PetTab(ScrollableFrame):
         return {
             "pishock_username": self.pishock_username.variable.get(),
             "pishock_api_key": self.pishock_api_key.variable.get(),
-            "feature_ear_tail": self.feature_ear_tail.variable.get(),
-            "feature_pronouns": self.feature_pronouns.variable.get(),
         }
 
     def apply_settings(self, settings: dict | None) -> None:
@@ -79,22 +72,47 @@ class PetTab(ScrollableFrame):
             if not settings:
                 self.pishock_username.variable.set("")
                 self.pishock_api_key.variable.set("")
-                self.feature_ear_tail.variable.set(False)
-                self.feature_pronouns.variable.set(False)
             else:
                 self.pishock_username.variable.set(settings.get("pishock_username", ""))
                 self.pishock_api_key.variable.set(settings.get("pishock_api_key", ""))
-                self.feature_ear_tail.variable.set(bool(settings.get("feature_ear_tail")))
-                self.feature_pronouns.variable.set(bool(settings.get("feature_pronouns")))
         finally:
             self._suppress_callbacks = False
+
+    def set_feature_flags(
+        self,
+        *,
+        feature_focus: bool = False,
+        feature_proximity: bool = False,
+        feature_tricks: bool = False,
+        feature_scolding: bool = False,
+        feature_ear_tail: bool = False,
+        feature_pronouns: bool = False,
+    ) -> None:
+        """Receive feature toggles controlled from the trainer side."""
+        self._feature_focus_enabled = bool(feature_focus)
+        self._feature_proximity_enabled = bool(feature_proximity)
+        self._feature_tricks_enabled = bool(feature_tricks)
+        self._feature_scolding_enabled = bool(feature_scolding)
+        self._feature_ear_tail_enabled = bool(feature_ear_tail)
+        self._feature_pronouns_enabled = bool(feature_pronouns)
+        # Refresh running status so Active features reflects latest toggles.
+        if self._is_running:
+            self.set_running_state(self._is_running)
 
     def set_running_state(self, running: bool) -> None:
         self._is_running = running
         active_features: list[str] = []
-        if self.feature_ear_tail.variable.get():
+        if self._feature_focus_enabled:
+            active_features.append("Focus")
+        if self._feature_proximity_enabled:
+            active_features.append("Proximity")
+        if self._feature_tricks_enabled:
+            active_features.append("Tricks")
+        if self._feature_scolding_enabled:
+            active_features.append("Scolding")
+        if self._feature_ear_tail_enabled:
             active_features.append("Ear/Tail pull")
-        if self.feature_pronouns.variable.get():
+        if self._feature_pronouns_enabled:
             active_features.append("Pronouns")
 
         update_running_state_ui(
