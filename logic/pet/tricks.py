@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import time
+
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
@@ -154,12 +156,14 @@ class TricksFeature:
                     deadline=now + self._command_timeout,
                 )
                 self._log(f"event=command_start feature=tricks runtime=pet name={detected}")
+                self._deliver_task_start_signal()
 
             if self._pending is not None:
                 if self._is_command_completed(self._pending.name):
                     self._log(
                         f"event=command_success feature=tricks runtime=pet name={self._pending.name} duration={now - self._pending.started_at:.2f}"
                     )
+                    self._deliver_completion_signal()
                     self._pending = None
                 elif now >= self._pending.deadline and now >= self._cooldown_until:
                     self._deliver_failure()
@@ -234,6 +238,23 @@ class TricksFeature:
             self._log(
                 f"event=shock feature=tricks runtime=pet name={self._pending.name if self._pending else 'unknown'} strength={strength}"
             )
+        except Exception:
+            return
+
+    def _deliver_task_start_signal(self) -> None:
+        try:
+            self.pishock.send_shock(strength=1, duration=0.2)
+            self._log("event=shock feature=tricks runtime=pet reason=task_start strength=1")
+        except Exception:
+            return
+
+    def _deliver_completion_signal(self) -> None:
+        try:
+            for pulse in (1, 2):
+                self.pishock.send_shock(strength=1, duration=0.2)
+                self._log(f"event=shock feature=tricks runtime=pet reason=task_complete pulse={pulse} strength=1")
+                if pulse == 1:
+                    time.sleep(0.2)
         except Exception:
             return
 
