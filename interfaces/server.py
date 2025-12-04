@@ -32,6 +32,9 @@ class DummyServerInterface:
         self._incoming: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
         self._latest_settings: dict[str, Any] = {}
 
+        self._username: str = "Anonymous"
+        self._session_users: list[dict[str, str]] = []
+
     # Lifecycle -------------------------------------------------------
     def start(self) -> None:
         self._connected = True
@@ -71,6 +74,9 @@ class DummyServerInterface:
         """Simulate hosting a new session and return details."""
         self._session_id = session_label or f"session-{uuid.uuid4().hex[:8]}"
         self._session_state = "hosting"
+        self._session_users = []
+        self._add_or_update_user(self._username, self._role)
+        self._ensure_pending_placeholder()
         self._record_session_event(f"started session {self._session_id}")
         return self.get_session_details()
 
@@ -82,6 +88,16 @@ class DummyServerInterface:
 
         self._session_id = cleaned
         self._session_state = "joined"
+        if not self._session_users:
+            self._session_users = [
+                {"username": "Host", "status": "trainer"},
+                {"username": "Guest", "status": "pending"},
+            ]
+
+        replaced_pending = self._replace_pending_with_self()
+        if not replaced_pending:
+            self._add_or_update_user(self._username, self._role)
+        self._ensure_pending_placeholder()
         self._record_session_event(f"joined session {self._session_id}")
         return self.get_session_details()
 
@@ -91,6 +107,7 @@ class DummyServerInterface:
             self._record_session_event(f"left session {self._session_id}")
         self._session_id = None
         self._session_state = "idle"
+        self._session_users = []
         return self.get_session_details()
 
     def get_session_details(self) -> dict[str, Any]:
@@ -98,11 +115,20 @@ class DummyServerInterface:
         return {
             "connected": self._connected,
             "role": self._role,
+            "username": self._username,
             "session_id": self._session_id,
             "state": self._session_state,
             "latest_settings": dict(self._latest_settings),
             "events": list(self._session_events[-10:]),
+            "session_users": [dict(user) for user in self._session_users],
         }
+
+    def set_username(self, username: str) -> None:
+        """Set the local username used when joining sessions."""
+        cleaned = username.strip()
+        old_username = self._username
+        self._username = cleaned or "Anonymous"
+        self._rename_user(old_username, self._username)
 
     # Server → trainer polling ---------------------------------------
     def poll_events(self, limit: int = 10) -> list[dict[str, Any]]:
@@ -146,3 +172,28 @@ class DummyServerInterface:
         timestamp = time.strftime("%H:%M:%S")
         self._session_events.append(f"[{timestamp}] {message}")
         self._log_message(message)
+
+    def _add_or_update_user(self, username: str, status: str) -> None:
+        for user in self._session_users:
+            if user.get("username") == username:
+                user["status"] = status
+                return
+        self._session_users.append({"username": username, "status": status})
+
+    def _ensure_pending_placeholder(self) -> None:
+        if not any(user.get("status") == "pending" for user in self._session_users):
+            self._session_users.append({"username": "Pending user", "status": "pending"})
+
+    def _replace_pending_with_self(self) -> bool:
+        for user in self._session_users:
+            if user.get("status") == "pending":
+                user["username"] = self._username
+                user["status"] = self._role
+                return True
+        return False
+
+    def _rename_user(self, old_username: str, new_username: str) -> None:
+        for user in self._session_users:
+            if user.get("username") == old_username:
+                user["username"] = new_username
+                return

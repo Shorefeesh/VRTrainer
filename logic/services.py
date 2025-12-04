@@ -93,17 +93,30 @@ def _ensure_server(role: str = "trainer") -> DummyServerInterface:
     return _server_interface
 
 
-def start_server_session(session_label: str | None = None) -> dict:
+def set_server_username(username: str | None) -> dict:
+    """Update the username used for server interactions."""
+
+    server = _ensure_server()
+    if username is not None:
+        server.set_username(username)
+    return server.get_session_details()
+
+
+def start_server_session(session_label: str | None = None, *, username: str | None = None) -> dict:
     """Start a new server session (stub)."""
 
     server = _ensure_server()
+    if username is not None:
+        server.set_username(username)
     return server.start_session(session_label=session_label)
 
 
-def join_server_session(session_id: str) -> dict:
+def join_server_session(session_id: str, *, username: str | None = None) -> dict:
     """Join an existing server session (stub)."""
 
     server = _ensure_server()
+    if username is not None:
+        server.set_username(username)
     return server.join_session(session_id=session_id)
 
 
