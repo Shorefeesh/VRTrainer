@@ -4,7 +4,7 @@ import time
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.server import DummyServerInterface
+from interfaces.server import RemoteServerInterface
 from logic.logging_utils import LogFile
 
 
@@ -28,7 +28,7 @@ class TricksFeature:
         self,
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
-        server: DummyServerInterface | None = None,
+        server: RemoteServerInterface | None = None,
         *,
         names: list[str] | None = None,
         scaling: dict[str, float] | None = None,

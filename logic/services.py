@@ -2,11 +2,14 @@ from __future__ import annotations
 
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional
+import os
+import logging
+import time
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
-from interfaces.server import DummyServerInterface
+from interfaces.server import RemoteServerInterface
 from logic.logging_utils import SessionLogManager
 from logic.pet.focus import FocusFeature
 from logic.pet.pronouns import PronounsFeature
@@ -44,7 +47,34 @@ class PetRuntime:
 
 _trainer_runtime: Optional[TrainerRuntime] = None
 _pet_runtime: Optional[PetRuntime] = None
-_server_interface: Optional[DummyServerInterface] = None
+_server_interface: Optional[RemoteServerInterface] = None
+_logger = logging.getLogger(__name__)
+_status_cache: Dict[str, Dict[str, Any]] = {"trainer": {}, "pet": {}}
+
+
+def _maybe_publish_status(role: str, status: Dict[str, str]) -> None:
+    """Push runtime status to the shared session (if connected).
+
+    Uses a small cache to avoid hammering the server with identical payloads.
+    """
+
+    if _server_interface is None:
+        return
+
+    cache = _status_cache.setdefault(role, {})
+    last_payload = cache.get("payload")
+    last_ts = float(cache.get("ts", 0.0))
+    now = time.time()
+
+    if status == last_payload and now - last_ts < 5.0:
+        return
+
+    try:
+        _server_interface.send_stats({"kind": "status", **status})
+        cache["payload"] = dict(status)
+        cache["ts"] = now
+    except Exception:
+        pass
 
 
 def _apply_feature_flags(features: List[Any], feature_flags: Dict[type, bool]) -> None:
@@ -87,13 +117,33 @@ def _extract_scaling(settings: Dict[str, Any]) -> Dict[str, float]:
     }
 
 
-def _ensure_server(role: str = "trainer") -> DummyServerInterface:
-    """Create or return the shared dummy server interface."""
+def _create_server(role: str) -> RemoteServerInterface:
+    """Instantiate the configured server interface (remote if available)."""
+    base_url = os.getenv("VRTRAINER_SERVER_URL", "").strip()
+
+    # Prefer the hosted API when a URL is configured (default points to production).
+    if base_url or os.getenv("VRTRAINER_USE_REMOTE", "1") == "1":
+        target = base_url or "https://vrtrainer.online"
+        server = RemoteServerInterface(base_url=target, role=role)
+        server.start()
+        if server.is_connected:
+            _logger.info("Connected to remote server at %s", target)
+            return server
+        _logger.warning("Remote server %s unreachable", target)
+
+    raise ConnectionError
+
+
+
+
+def _ensure_server(role: str | None = None) -> RemoteServerInterface:
+    """Create or return the shared server interface (remote or dummy)."""
     global _server_interface
 
     if _server_interface is None:
-        _server_interface = DummyServerInterface(role=role)
-        _server_interface.start()
+        _server_interface = _create_server(role or "trainer")
+    elif role is not None:
+        _server_interface.set_role(role)
     return _server_interface
 
 
@@ -106,19 +156,24 @@ def set_server_username(username: str | None) -> dict:
     return server.get_session_details()
 
 
-def start_server_session(session_label: str | None = None, *, username: str | None = None) -> dict:
+def start_server_session(
+    session_label: str | None = None,
+    *,
+    username: str | None = None,
+    role: str = "trainer",
+) -> dict:
     """Start a new server session (stub)."""
 
-    server = _ensure_server()
+    server = _ensure_server(role)
     if username is not None:
         server.set_username(username)
     return server.start_session(session_label=session_label)
 
 
-def join_server_session(session_id: str, *, username: str | None = None) -> dict:
+def join_server_session(session_id: str, *, username: str | None = None, role: str = "trainer") -> dict:
     """Join an existing server session (stub)."""
 
-    server = _ensure_server()
+    server = _ensure_server(role)
     if username is not None:
         server.set_username(username)
     return server.join_session(session_id=session_id)
@@ -147,11 +202,8 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
         role="trainer",
     )
 
-    pishock = PiShockInterface(
-        username=trainer_settings.get("pishock_username") or "",
-        api_key=trainer_settings.get("pishock_api_key") or "",
-        role="trainer",
-    )
+    # Trainer mode keeps PiShock disabled; credentials are no longer collected on the trainer tab.
+    pishock = PiShockInterface(username="", api_key="", role="trainer")
 
     whisper = WhisperInterface(input_device=input_device)
 
@@ -169,24 +221,28 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
         TrainerFocusFeature(
             whisper=whisper,
             server=server,
+            osc=osc,
             names=trainer_settings.get("names") or [],
             logger=logs.get_logger("trainer_focus_feature.log"),
         ),
         TrainerProximityFeature(
             whisper=whisper,
             server=server,
+            osc=osc,
             names=trainer_settings.get("names") or [],
             logger=logs.get_logger("trainer_proximity_feature.log"),
         ),
         TrainerTricksFeature(
             whisper=whisper,
             server=server,
+            osc=osc,
             names=trainer_settings.get("names") or [],
             logger=logs.get_logger("trainer_tricks_feature.log"),
         ),
         TrainerScoldingFeature(
             whisper=whisper,
             server=server,
+            osc=osc,
             scolding_words=trainer_settings.get("scolding_words") or [],
             logger=logs.get_logger("trainer_scolding_feature.log"),
         ),
@@ -474,3 +530,25 @@ def get_pet_whisper_log_text() -> str:
         return ""
 
     return runtime.whisper.get_new_text("pet_ui_log")
+
+
+def get_trainer_whisper_backend() -> str:
+    runtime = _trainer_runtime
+    if runtime is None:
+        return "Stopped"
+    return runtime.whisper.get_backend_summary()
+
+
+def get_pet_whisper_backend() -> str:
+    runtime = _pet_runtime
+    if runtime is None:
+        return "Stopped"
+    return runtime.whisper.get_backend_summary()
+
+
+def publish_runtime_status(role: str, status: Dict[str, str]) -> None:
+    """Share the latest runtime status with the active session."""
+
+    if role not in {"trainer", "pet"}:
+        return
+    _maybe_publish_status(role, status)

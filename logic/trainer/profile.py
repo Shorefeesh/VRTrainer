@@ -6,8 +6,6 @@ from typing import Any, Dict, List
 
 TRAINER_SETTINGS_KEYS = [
     "profile",
-    "pishock_username",
-    "pishock_api_key",
     "feature_focus",
     "feature_proximity",
     "feature_tricks",
@@ -54,8 +52,6 @@ def default_profile_settings(profile_name: str) -> Dict[str, Any]:
     """Default settings for a new trainer profile."""
     return {
         "profile": profile_name,
-        "pishock_username": "",
-        "pishock_api_key": "",
         "feature_focus": False,
         "feature_proximity": False,
         "feature_tricks": False,
@@ -90,6 +86,10 @@ def update_profile_from_settings(config: Dict[str, Any], settings: Dict[str, Any
         return
 
     existing = trainer["profiles"].get(profile_name) or default_profile_settings(profile_name)
+
+    # Remove legacy PiShock fields that are no longer stored on trainer profiles.
+    existing.pop("pishock_username", None)
+    existing.pop("pishock_api_key", None)
 
     for key in TRAINER_SETTINGS_KEYS:
         if key in settings:

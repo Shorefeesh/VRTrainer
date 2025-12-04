@@ -25,6 +25,7 @@ class VRChatOSCInterface:
         self._running = False
         self._host = "127.0.0.1"
         self._port = 9001
+        self._tx_port = 9000
 
         # Only the pet runtime should attach to VRChat OSC. The trainer
         # receives data through the server instead of binding a local
@@ -36,6 +37,8 @@ class VRChatOSCInterface:
         self._message_times = deque()
         self._trainer_params_seen: set[str] = set()
         self._expected_trainer_params:  set[str] = {
+        }
+        self._expected_pet_pull_params: set[str] = {
             "Trainer/Proximity",
             "Trainer/Focus",
             "Trainer/Paw",
@@ -43,8 +46,6 @@ class VRChatOSCInterface:
             "Trainer/FootNearFloor",
             "Trainer/HeadNearFloor",
             "Trainer/HipsNearFloor",
-        }
-        self._expected_pet_pull_params: set[str] = {
             "LeftEar_IsGrabbed",
             "LeftEar_Stretch",
             "RightEar_IsGrabbed",
@@ -57,6 +58,8 @@ class VRChatOSCInterface:
         self._log_all_events = log_all_events
         self._log_relevant_events = log_relevant_events
 
+        self._tx_client = None
+        
         self._server = None
         self._thread = None
 
@@ -108,6 +111,72 @@ class VRChatOSCInterface:
             server.shutdown()
             server.server_close()
         self._thread = None
+
+    # Outbound helpers ------------------------------------------------
+    def _ensure_tx_client(self):
+        """Create (or return) the UDP client used to send OSC to VRChat."""
+
+        if self._tx_client is not None:
+            return self._tx_client
+
+        try:
+            from pythonosc.udp_client import SimpleUDPClient
+
+            self._tx_client = SimpleUDPClient(self._host, self._tx_port)
+        except Exception:
+            self._tx_client = None
+
+        return self._tx_client
+
+    def send_parameter(self, name: str, value: object) -> bool:
+        """Send a single avatar parameter to the local VRChat client.
+
+        Returns ``True`` when the message was queued successfully.
+        This works even when OSC listening is disabled on the trainer side.
+        """
+
+        client = self._ensure_tx_client()
+        if client is None:
+            return False
+
+        address = f"/avatar/parameters/{name}"
+
+        try:
+            client.send_message(address, value)
+            self._log_message(self._log_relevant_events, f"OSC send {address} value={value}")
+            return True
+        except Exception:
+            return False
+
+    def pulse_parameter(
+        self,
+        name: str,
+        *,
+        value_on: object = 1,
+        value_off: object = 0,
+        duration: float = 0.2,
+    ) -> None:
+        """Toggle an avatar parameter on briefly, then turn it off.
+
+        A short pulse works well for trigger-style bool parameters on
+        the avatar. Failures are swallowed to keep the trainer loop
+        resilient.
+        """
+
+        if not self.send_parameter(name, value_on):
+            return
+
+        if duration <= 0:
+            return
+
+        import threading
+        import time
+
+        def _reset() -> None:
+            time.sleep(duration)
+            self.send_parameter(name, value_off)
+
+        threading.Thread(target=_reset, name=f"OSCPulse:{name}", daemon=True).start()
 
     # Internal helpers -------------------------------------------------
     def _on_osc_message(self, address: str, *values: object) -> None:

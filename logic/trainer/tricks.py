@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import threading
 
-from interfaces.server import DummyServerInterface
+from interfaces.vrchatosc import VRChatOSCInterface
+from interfaces.server import RemoteServerInterface
 from interfaces.whisper import WhisperInterface
 from logic.logging_utils import LogFile
 
@@ -13,13 +14,15 @@ class TrainerTricksFeature:
     def __init__(
         self,
         whisper: WhisperInterface,
-        server: DummyServerInterface,
+        server: RemoteServerInterface,
+        osc: VRChatOSCInterface | None = None,
         *,
         names: list[str] | None = None,
         logger: LogFile | None = None,
     ) -> None:
         self.whisper = whisper
         self.server = server
+        self.osc = osc
         self._logger = logger
         self._enabled = True
         self._running = False
@@ -35,6 +38,15 @@ class TrainerTricksFeature:
             "beg": ["beg"],
             "play_dead": ["play dead", "playdead", "played dead"],
             "roll_over": ["rollover", "roll over"],
+        }
+
+        self._command_ids: dict[str, int] = {
+            "paw": 1,
+            "sit": 2,
+            "lay_down": 3,
+            "beg": 4,
+            "play_dead": 5,
+            "roll_over": 6,
         }
 
         self._thread: threading.Thread | None = None
@@ -96,6 +108,7 @@ class TrainerTricksFeature:
                 try:
                     self.server.send_command(detected, {"feature": "tricks"})
                     self._log(f"event=command_start feature=tricks runtime=trainer name={detected}")
+                    self._pulse_command(detected)
                 except Exception:
                     pass
 
@@ -147,5 +160,18 @@ class TrainerTricksFeature:
 
         try:
             logger.log(message)
+        except Exception:
+            return
+
+    def _pulse_command(self, command: str) -> None:
+        osc = self.osc
+        if osc is None:
+            return
+
+        try:
+            cmd_id = self._command_ids.get(command, 0)
+            if cmd_id:
+                osc.send_parameter("Trainer/CommandTrickId", cmd_id)
+            osc.pulse_parameter("Trainer/CommandTrick", value_on=1, value_off=0, duration=0.2)
         except Exception:
             return

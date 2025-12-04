@@ -4,4 +4,5 @@ models/
 config.yaml
 dist/
 build/
+logs/
 *.spec

@@ -2,17 +2,11 @@ import tkinter as tk
 from tkinter import ttk, simpledialog, messagebox
 
 from .shared import (
-    LabeledEntry,
     LabeledCheckbutton,
     LabeledCombobox,
     LabeledScale,
-    StatusIndicator,
     ScrollableFrame,
     create_features_frame,
-    create_pishock_credentials_frame,
-    create_running_status_frame,
-    update_running_state_ui,
-    update_osc_status_indicator,
 )
 
 
@@ -23,39 +17,41 @@ class TrainerTab(ScrollableFrame):
         self,
         master,
         on_settings_change=None,
-        on_start=None,
         on_profile_selected=None,
         on_profile_renamed=None,
         on_profile_deleted=None,
+        input_device_var: tk.StringVar | None = None,
         **kwargs,
     ) -> None:
         super().__init__(master, **kwargs)
 
         self.on_settings_change = on_settings_change
-        self.on_start = on_start
         self.on_profile_selected = on_profile_selected
         self.on_profile_renamed = on_profile_renamed
         self.on_profile_deleted = on_profile_deleted
         self._suppress_callbacks = False
-        self._is_running = False
         self._detail_frames: list[ttk.Frame] = []
 
+        self._build_input_device_row(input_device_var)
         self._build_profile_section()
-        self._build_pishock_section()
         self._build_features_section()
         self._build_word_lists_section()
         self._build_scaling_section()
-        self._build_controls_section()
 
         for col in range(2):
             self.container.columnconfigure(col, weight=1)
 
         self._update_profile_visibility()
 
+    # Input device -------------------------------------------------------
+    def _build_input_device_row(self, variable: tk.StringVar | None) -> None:
+        self.input_device_row = LabeledCombobox(self.container, "Input device", variable=variable)
+        self.input_device_row.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 6))
+
     # Profile management -------------------------------------------------
     def _build_profile_section(self) -> None:
         frame = ttk.LabelFrame(self.container, text="Profile")
-        frame.grid(row=0, column=0, columnspan=2, sticky="ew", padx=12, pady=(12, 6))
+        frame.grid(row=1, column=0, columnspan=2, sticky="ew", padx=12, pady=(0, 6))
         frame.columnconfigure(0, weight=1)
 
         self.profile_row = LabeledCombobox(frame, "Profile")
@@ -160,15 +156,6 @@ class TrainerTab(ScrollableFrame):
             self._suppress_callbacks = False
         self._update_profile_visibility()
 
-    # PiShock credentials ------------------------------------------------
-    def _build_pishock_section(self) -> None:
-        frame, self.pishock_username, self.pishock_api_key = create_pishock_credentials_frame(self.container)
-        frame.grid(row=1, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
-        self._detail_frames.append(frame)
-
-        self.pishock_username.variable.trace_add("write", self._on_any_setting_changed)
-        self.pishock_api_key.variable.trace_add("write", self._on_any_setting_changed)
-
     # Feature toggles ----------------------------------------------------
     def _build_features_section(self) -> None:
         frame, features = create_features_frame(
@@ -253,34 +240,20 @@ class TrainerTab(ScrollableFrame):
         for scale in (self.delay_scale, self.cooldown_scale, self.duration_scale, self.strength_scale):
             scale.variable.trace_add("write", self._on_any_setting_changed)
 
-    # Controls + status --------------------------------------------------
-    def _build_controls_section(self) -> None:
-        control_frame = ttk.Frame(self.container)
-        control_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
-        control_frame.columnconfigure(0, weight=1)
-        self._detail_frames.append(control_frame)
-
-        self.start_button = ttk.Button(control_frame, text="Start", command=self._toggle_start)
-        self.start_button.grid(row=0, column=0, sticky="w")
-
-        (
-            status_frame,
-            self.osc_status,
-            self.pishock_status,
-            self.whisper_status,
-            self.whisper_log,
-            self.active_features_status,
-        ) = create_running_status_frame(control_frame)
-
-        status_frame.grid(row=1, column=0, sticky="nsew", pady=(8, 0))
-
     # Public helpers -----------------------------------------------------
+    @property
+    def input_device(self) -> str:
+        return self.input_device_row.variable.get()
+
+    def set_input_devices(self, devices) -> None:
+        self.input_device_row.set_values(devices)
+        if devices and not self.input_device_row.variable.get():
+            self.input_device_row.variable.set(devices[0])
+
     def collect_settings(self) -> dict:
         """Collect the current trainer settings into a dictionary."""
         return {
             "profile": self.profile_row.variable.get(),
-            "pishock_username": self.pishock_username.variable.get(),
-            "pishock_api_key": self.pishock_api_key.variable.get(),
             "feature_focus": self.feature_focus.variable.get(),
             "feature_proximity": self.feature_proximity.variable.get(),
             "feature_tricks": self.feature_tricks.variable.get(),
@@ -301,8 +274,6 @@ class TrainerTab(ScrollableFrame):
         try:
             if not settings:
                 # Reset to defaults if nothing is stored yet.
-                self.pishock_username.variable.set("")
-                self.pishock_api_key.variable.set("")
                 self.feature_focus.variable.set(False)
                 self.feature_proximity.variable.set(False)
                 self.feature_tricks.variable.set(False)
@@ -321,8 +292,6 @@ class TrainerTab(ScrollableFrame):
                 if profile_name:
                     self.profile_row.variable.set(profile_name)
 
-                self.pishock_username.variable.set(settings.get("pishock_username", ""))
-                self.pishock_api_key.variable.set(settings.get("pishock_api_key", ""))
                 self.feature_focus.variable.set(bool(settings.get("feature_focus")))
                 self.feature_proximity.variable.set(bool(settings.get("feature_proximity")))
                 self.feature_tricks.variable.set(bool(settings.get("feature_tricks")))
@@ -345,47 +314,6 @@ class TrainerTab(ScrollableFrame):
             self._suppress_callbacks = False
 
         self._update_profile_visibility()
-
-    def set_running_state(self, running: bool) -> None:
-        """Update UI to reflect running state."""
-        self._is_running = running
-
-        active_features: list[str] = []
-        if self.feature_focus.variable.get():
-            active_features.append("Focus")
-        if self.feature_proximity.variable.get():
-            active_features.append("Proximity")
-        if self.feature_tricks.variable.get():
-            active_features.append("Tricks")
-        if self.feature_scolding.variable.get():
-            active_features.append("Scolding")
-
-        update_running_state_ui(
-            running=running,
-            start_button=self.start_button,
-            osc_status=self.osc_status,
-            pishock_status=self.pishock_status,
-            whisper_status=self.whisper_status,
-            active_features_status=self.active_features_status,
-            active_features=active_features,
-        )
-
-    def update_osc_status(self, osc_status: dict) -> None:
-        """Update the VRChat OSC status line with live diagnostics."""
-        update_osc_status_indicator(
-            is_running=self._is_running,
-            status_indicator=self.osc_status,
-            osc_status=osc_status,
-            primary_expected_key="expected_trainer_params_total",
-            primary_found_key="found_trainer_params",
-        )
-
-    def append_whisper_log(self, text: str) -> None:
-        """Append a line to the Whisper text log."""
-        self.whisper_log.configure(state="normal")
-        self.whisper_log.insert("end", text + "\n")
-        self.whisper_log.see("end")
-        self.whisper_log.configure(state="disabled")
 
     # Internal helpers ---------------------------------------------------
     def _get_words_from_text(self, widget: tk.Text) -> list[str]:
@@ -431,9 +359,3 @@ class TrainerTab(ScrollableFrame):
                 frame.grid()
             else:
                 frame.grid_remove()
-
-    def _toggle_start(self) -> None:
-        new_state = not self._is_running
-        self.set_running_state(new_state)
-        if self.on_start is not None:
-            self.on_start(new_state)

@@ -4,7 +4,7 @@ from typing import Optional
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.server import DummyServerInterface
+from interfaces.server import RemoteServerInterface
 from logic.logging_utils import LogFile
 
 
@@ -20,7 +20,7 @@ class ProximityFeature:
         self,
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
-        server: DummyServerInterface | None = None,
+        server: RemoteServerInterface | None = None,
         *,
         scaling: Optional[dict[str, float]] = None,
         logger: LogFile | None = None,
@@ -52,6 +52,11 @@ class ProximityFeature:
         self._shock_strength_max: float = self._base_shock_strength_max
         self._base_shock_duration: float = 0.5
         self._shock_duration: float = self._base_shock_duration
+        self._base_command_timeout: float = 4.0
+        self._command_timeout: float = self._base_command_timeout
+        self._command_target: float = 1
+        self._pending_command_deadline: float | None = None
+        self._last_sample_log: float = 0.0
         self.set_scaling(
             delay_scale=(scaling or {}).get("delay_scale", 1.0),
             cooldown_scale=(scaling or {}).get("cooldown_scale", 1.0),
@@ -60,12 +65,6 @@ class ProximityFeature:
         )
 
         # Summon command tracking triggered via the trainer/server path.
-        self._base_command_timeout: float = 4.0
-        self._command_timeout: float = self._base_command_timeout
-        self._command_target: float = 1
-        self._pending_command_deadline: float | None = None
-        self._last_sample_log: float = 0.0
-
         self._log("event=init feature=proximity runtime=pet")
 
     def start(self) -> None:
@@ -256,4 +255,3 @@ class ProximityFeature:
             server.send_stats(stats)
         except Exception:
             return
-

@@ -5,7 +5,7 @@ import time
 from typing import Iterable, List, Optional
 
 from interfaces.pishock import PiShockInterface
-from interfaces.server import DummyServerInterface
+from interfaces.server import RemoteServerInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from logic.logging_utils import LogFile
 
@@ -22,7 +22,7 @@ class ScoldingFeature:
         self,
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
-        server: DummyServerInterface | None = None,
+        server: RemoteServerInterface | None = None,
         *,
         scolding_words: Optional[Iterable[str]] = None,
         scaling: Optional[dict[str, float]] = None,

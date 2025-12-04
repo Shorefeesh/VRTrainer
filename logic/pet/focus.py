@@ -4,7 +4,7 @@ from typing import Optional
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.server import DummyServerInterface
+from interfaces.server import RemoteServerInterface
 from logic.logging_utils import LogFile
 
 
@@ -19,7 +19,7 @@ class FocusFeature:
         self,
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
-        server: DummyServerInterface | None = None,
+        server: RemoteServerInterface | None = None,
         *,
         scaling: Optional[dict[str, float]] = None,
         logger: LogFile | None = None,
@@ -249,4 +249,3 @@ class FocusFeature:
             server.send_stats(stats)
         except Exception:
             return
-

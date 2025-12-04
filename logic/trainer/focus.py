@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import threading
 
-from interfaces.server import DummyServerInterface
+from interfaces.vrchatosc import VRChatOSCInterface
+from interfaces.server import RemoteServerInterface
 from interfaces.whisper import WhisperInterface
 from logic.logging_utils import LogFile
 
@@ -13,13 +14,15 @@ class TrainerFocusFeature:
     def __init__(
         self,
         whisper: WhisperInterface,
-        server: DummyServerInterface,
+        server: RemoteServerInterface,
+        osc: VRChatOSCInterface | None = None,
         *,
         names: list[str] | None = None,
         logger: LogFile | None = None,
     ) -> None:
         self.whisper = whisper
         self.server = server
+        self.osc = osc
         self._logger = logger
         self._enabled = True
         self._running = False
@@ -110,6 +113,7 @@ class TrainerFocusFeature:
             self._log(
                 f"event=command_start feature=focus runtime=trainer reasons={'|'.join(penalties)} text={normalised}"
             )
+            self._pulse_command_flag("Trainer/CommandFocus")
         except Exception:
             pass
 
@@ -148,5 +152,15 @@ class TrainerFocusFeature:
 
         try:
             logger.log(message)
+        except Exception:
+            return
+
+    def _pulse_command_flag(self, flag_name: str) -> None:
+        osc = self.osc
+        if osc is None:
+            return
+
+        try:
+            osc.pulse_parameter(flag_name, value_on=1, value_off=0, duration=0.2)
         except Exception:
             return

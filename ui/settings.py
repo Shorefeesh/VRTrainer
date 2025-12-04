@@ -12,12 +12,12 @@ class SettingsTab(ttk.Frame):
     integrate with actual audio device discovery.
     """
 
-    def __init__(self, master, on_settings_change=None, **kwargs) -> None:
+    def __init__(self, master, on_settings_change=None, *, input_device_var: tk.StringVar | None = None, **kwargs) -> None:
         super().__init__(master, **kwargs)
 
         self.on_settings_change = on_settings_change
 
-        self.input_device_row = LabeledCombobox(self, "Input device")
+        self.input_device_row = LabeledCombobox(self, "Input device", variable=input_device_var)
         self.input_device_row.grid(row=0, column=0, sticky="ew", padx=12, pady=12)
 
         self.input_device_row.variable.trace_add("write", self._on_any_setting_changed)

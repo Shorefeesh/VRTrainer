@@ -11,6 +11,7 @@ from typing import Dict, List, Optional, Any
 
 
 _SHARED_WHISPER_MODEL: Any = None
+_SHARED_WHISPER_BACKEND: Optional[str] = None
 _SHARED_WHISPER_MODEL_LOCK = threading.Lock()
 
 
@@ -60,6 +61,7 @@ class WhisperInterface:
         # Lazy-loaded external dependencies; set during start().
         self._whisper_model = None
         self._sd = None  # sounddevice module
+        self._backend_label: Optional[str] = None
 
         # Lock to protect transcript/tag structures.
         self._lock = threading.Lock()
@@ -105,6 +107,7 @@ class WhisperInterface:
 
         # Load a small/fast default model once per process and reuse it.
         global _SHARED_WHISPER_MODEL
+        global _SHARED_WHISPER_BACKEND
         with _SHARED_WHISPER_MODEL_LOCK:
             if _SHARED_WHISPER_MODEL is None:
                 cache_dir = self._resolve_whisper_cache_dir()
@@ -124,8 +127,11 @@ class WhisperInterface:
                 if compute_type:
                     kwargs["compute_type"] = compute_type
 
+                backend_label = self._format_backend_label(device, compute_type)
+
                 try:  # pragma: no cover - environment/model specific
                     _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
+                    _SHARED_WHISPER_BACKEND = backend_label
                 except Exception:
                     # If model load fails (e.g. missing CUDA/cuDNN when the
                     # GPU backend is requested), fall back to a safe CPU-only
@@ -135,14 +141,20 @@ class WhisperInterface:
                             kwargs["device"] = "cpu"
                             kwargs.pop("compute_type", None)
                             _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
+                            _SHARED_WHISPER_BACKEND = "CPU"
                         except Exception:
                             self._running = True
                             return
                     else:
                         self._running = True
                         return
+            elif _SHARED_WHISPER_BACKEND is None:
+                # Model is already loaded but backend label was not set; fall
+                # back to an unknown marker instead of lying.
+                _SHARED_WHISPER_BACKEND = "Unknown"
 
         self._whisper_model = _SHARED_WHISPER_MODEL
+        self._backend_label = _SHARED_WHISPER_BACKEND
 
         self._stop_event.clear()
         self._thread = threading.Thread(target=self._worker_loop, name="WhisperWorker", daemon=True)
@@ -173,6 +185,22 @@ class WhisperInterface:
     def is_running(self) -> bool:
         return self._running
 
+    def get_backend_summary(self) -> str:
+        """Return a human-friendly summary of the active backend.
+
+        Expected values are ``CPU`` or ``GPU (...`` depending on the
+        configured device and compute type. Falls back to ``Stopped`` when
+        Whisper is not running.
+        """
+
+        if not self._running:
+            return "Stopped"
+        if self._backend_label:
+            return self._backend_label
+        if self._whisper_model is None:
+            return "Unavailable"
+        return "Running"
+
     # ------------------------------------------------------------------
     # Whisper model/cache helpers
     # ------------------------------------------------------------------
@@ -196,6 +224,14 @@ class WhisperInterface:
             return None
 
         return path
+
+    @staticmethod
+    def _format_backend_label(device: str | None, compute_type: str | None) -> str:
+        device = (device or "cpu").lower()
+        base = "CPU" if device == "cpu" else "GPU"
+        if compute_type:
+            return f"{base} ({compute_type})"
+        return base
 
     # ------------------------------------------------------------------
     # Transcript API

@@ -20,12 +20,12 @@ class LabeledEntry(ttk.Frame):
 class LabeledCombobox(ttk.Frame):
     """A label with a combobox."""
 
-    def __init__(self, master, text: str, values=None, **combo_kwargs) -> None:
+    def __init__(self, master, text: str, values=None, *, variable: tk.StringVar | None = None, **combo_kwargs) -> None:
         super().__init__(master)
         if values is None:
             values = []
 
-        self.variable = tk.StringVar()
+        self.variable = variable or tk.StringVar()
 
         self.label = ttk.Label(self, text=text)
         self.combobox = ttk.Combobox(

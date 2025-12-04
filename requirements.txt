@@ -4,3 +4,4 @@ pishock
 sounddevice
 faster-whisper
 matplotlib
+requests

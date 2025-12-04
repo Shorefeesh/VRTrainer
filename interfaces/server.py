@@ -1,129 +1,163 @@
 from __future__ import annotations
 
-from typing import Any, Callable, MutableMapping
+from typing import Any, Callable, MutableMapping, Optional
 import time
 from collections import deque
 import uuid
+import logging
+
+try:
+    import requests
+except ImportError:  # pragma: no cover - optional runtime dep when remote server is used
+    requests = None  # type: ignore[assignment]
 
 
-class DummyServerInterface:
-    """Placeholder client for vrtrainer.online until the real API exists.
 
-    The trainer runtime can call ``send_settings``, ``send_command``, or
-    ``send_scold`` and poll the resulting stub acknowledgements with
-    ``poll_events``. No network traffic occurs; everything is kept
-    in-memory so other components can be wired up without the server.
+class RemoteServerInterface:
+    """HTTP client for the hosted vrtrainer.online API.
+
+    Set the environment variable
+    ``VRTRAINER_SERVER_URL`` (default ``https://vrtrainer.online``) to
+    enable this interface.
     """
 
     def __init__(
         self,
+        base_url: str = "https://vrtrainer.online",
         *,
         role: str = "trainer",
+        username: str = "Anonymous",
         log: Callable[[str], None] | None = None,
+        timeout: float = 6.0,
     ) -> None:
+        if requests is None:  # pragma: no cover - import guard
+            raise RuntimeError("requests is required for RemoteServerInterface (pip install requests)")
+
+        self.base_url = base_url.rstrip("/")
         self._role = "trainer" if role == "trainer" else "pet"
-        self._log = log
+        self._username = username.strip() or "Anonymous"
+        self._log = log or logging.getLogger(__name__).debug
+        self._timeout = timeout
+
         self._connected = False
         self._session_id: str | None = None
         self._session_state: str = "idle"
-        self._session_events: list[str] = []
-
-        self._outgoing: list[dict[str, Any]] = []
-        self._incoming: deque[dict[str, Any]] = deque()
         self._latest_settings: dict[str, Any] = {}
-        self._user_stats: dict[str, deque[dict[str, Any]]] = {}
-
-        self._username: str = "Anonymous"
-        self._session_users: list[dict[str, str]] = []
+        self._session_users: list[dict[str, Any]] = []
+        self._events: list[str] = []
+        self._last_event_id: str | None = None
+        # Track processed server event ids to avoid duplicate log spam when polling
+        # and when periodically refreshing session details.
+        self._seen_event_ids: deque[str] = deque(maxlen=200)
+        self._seen_event_ids_set: set[str] = set()
+        self._stats_by_user: dict[str, list[dict[str, Any]]] = {}
 
     # Lifecycle -------------------------------------------------------
     def start(self) -> None:
-        self._connected = True
-        self._log_message("dummy server started")
+        """Mark as connected; performs a lightweight health probe."""
+        try:
+            resp = requests.get(f"{self.base_url}/health", timeout=self._timeout)
+            resp.raise_for_status()
+            self._log("remote server reachable")
+            self._connected = True
+        except Exception as exc:
+            self._log(f"remote server health check failed: {exc}")
+            self._connected = False
 
     def stop(self) -> None:
         self._connected = False
-        self._log_message("dummy server stopped")
+        self._session_id = None
+        self._session_state = "idle"
+        self._session_users = []
+        self._events = []
+        self._last_event_id = None
+        self._seen_event_ids.clear()
+        self._seen_event_ids_set.clear()
+        self._stats_by_user = {}
 
     @property
     def is_connected(self) -> bool:
         return self._connected
 
-    # Trainer → server stubs -----------------------------------------
+    # Trainer → server -----------------------------------------------
     def send_settings(self, settings: MutableMapping[str, Any]) -> None:
-        """Record trainer settings and queue a stub acknowledgement."""
-        data = dict(settings)
-        self._latest_settings = data
-        payload = {"type": "settings", "data": data}
-        self._record_outgoing(payload)
-        self._enqueue_ack(payload)
+        if not self._session_id:
+            return
+        self._post(
+            f"/api/sessions/{self._session_id}/settings",
+            {"username": self._username, "role": self._role, "settings": dict(settings)},
+        )
 
     def send_command(self, phrase: str, metadata: MutableMapping[str, Any] | None = None) -> None:
-        """Record a trainer-issued command phrase."""
-        payload = {"type": "command", "phrase": phrase, "meta": dict(metadata or {})}
-        self._record_outgoing(payload)
-        self._enqueue_ack(payload)
+        if not self._session_id:
+            return
+        self._post(
+            f"/api/sessions/{self._session_id}/command",
+            {"username": self._username, "role": self._role, "phrase": phrase, "meta": dict(metadata or {})},
+        )
 
     def send_scold(self, phrase: str, metadata: MutableMapping[str, Any] | None = None) -> None:
-        """Record a trainer scolding phrase."""
-        payload = {"type": "scold", "phrase": phrase, "meta": dict(metadata or {})}
-        self._record_outgoing(payload)
-        self._enqueue_ack(payload)
+        if not self._session_id:
+            return
+        self._post(
+            f"/api/sessions/{self._session_id}/scold",
+            {"username": self._username, "role": self._role, "phrase": phrase, "meta": dict(metadata or {})},
+        )
 
     def send_stats(self, stats: MutableMapping[str, Any]) -> None:
-        """Record pet stats tied to the current username."""
+        if not self._session_id:
+            return
+        self._post(
+            f"/api/sessions/{self._session_id}/stats",
+            {"username": self._username, "role": self._role, "stats": dict(stats)},
+        )
 
-        payload = {"type": "stats", "username": self._username, "data": dict(stats)}
-        self._record_outgoing(payload)
-        self._record_user_stats(payload)
-        self._enqueue_ack(payload)
-
-    # Session management stubs ---------------------------------------
+    # Session management ---------------------------------------------
     def start_session(self, session_label: str | None = None) -> dict[str, Any]:
-        """Simulate hosting a new session and return details."""
-        self._session_id = session_label or f"session-{uuid.uuid4().hex[:8]}"
+        payload = {"username": self._username, "role": self._role, "session_label": session_label}
+        data = self._post("/api/sessions", payload)
+        session = data.get("session", {})
+        self._capture_session(session)
         self._session_state = "hosting"
-        self._session_users = []
-        self._user_stats = {}
-        self._add_or_update_user(self._username, self._role)
-        self._ensure_pending_placeholder()
-        self._record_session_event(f"started session {self._session_id}")
+        self._record_event_string(f"started session {self._session_id}")
         return self.get_session_details()
 
     def join_session(self, session_id: str) -> dict[str, Any]:
-        """Simulate joining an existing session and return details."""
         cleaned = session_id.strip()
         if not cleaned:
             raise ValueError("Session code cannot be empty")
 
-        self._session_id = cleaned
+        payload = {"username": self._username, "role": self._role}
+        data = self._post(f"/api/sessions/{cleaned}/join", payload)
+        session = data.get("session", {})
+        self._capture_session(session)
         self._session_state = "joined"
-        self._user_stats = {}
-        if not self._session_users:
-            self._session_users = [
-                {"username": "Host", "status": "trainer"},
-                {"username": "Guest", "status": "pending"},
-            ]
-
-        replaced_pending = self._replace_pending_with_self()
-        if not replaced_pending:
-            self._add_or_update_user(self._username, self._role)
-        self._ensure_pending_placeholder()
-        self._record_session_event(f"joined session {self._session_id}")
+        self._record_event_string(f"joined session {self._session_id}")
         return self.get_session_details()
 
     def leave_session(self) -> dict[str, Any]:
-        """Simulate leaving the current session and return details."""
         if self._session_id:
-            self._record_session_event(f"left session {self._session_id}")
+            try:
+                self._post(f"/api/sessions/{self._session_id}/leave", {"username": self._username, "role": self._role})
+            except Exception:
+                pass
+            self._record_event_string(f"left session {self._session_id}")
         self._session_id = None
         self._session_state = "idle"
         self._session_users = []
-        self._user_stats = {}
+        self._events = []
+        self._last_event_id = None
         return self.get_session_details()
 
     def get_session_details(self) -> dict[str, Any]:
-        """Return a snapshot of current session info and history."""
+        if self._session_id and self._connected:
+            try:
+                session_resp = self._get(f"/api/sessions/{self._session_id}")
+                session = session_resp.get("session", {})
+                self._capture_session(session)
+            except Exception as exc:
+                self._log(f"session refresh failed: {exc}")
+
         return {
             "connected": self._connected,
             "role": self._role,
@@ -131,46 +165,54 @@ class DummyServerInterface:
             "session_id": self._session_id,
             "state": self._session_state,
             "latest_settings": dict(self._latest_settings),
-            "events": list(self._session_events[-10:]),
-            "session_users": [dict(user) for user in self._session_users],
-            "stats_by_user": {user: list(entries) for user, entries in self._user_stats.items()},
+            "events": list(self._events[-10:]),
+            "session_users": [dict(u) for u in self._session_users],
+            "stats_by_user": {k: list(v) for k, v in self._stats_by_user.items()},
         }
 
     def set_username(self, username: str) -> None:
-        """Set the local username used when joining sessions."""
         cleaned = username.strip()
-        old_username = self._username
         self._username = cleaned or "Anonymous"
-        self._rename_user(old_username, self._username)
 
-    # Server → trainer polling ---------------------------------------
+    def set_role(self, role: str) -> None:
+        self._role = "trainer" if role == "trainer" else "pet"
+
+    # Server → client polling ----------------------------------------
     def poll_events(
         self, limit: int = 10, *, predicate: Callable[[dict[str, Any]], bool] | None = None
     ) -> list[dict[str, Any]]:
-        """Return up to ``limit`` queued acknowledgements.
+        if not self._session_id or not self._connected:
+            return []
 
-        When ``predicate`` is provided, only events that satisfy it are
-        returned; unmatched events are preserved for other consumers.
-        """
+        events: list[dict[str, Any]] = []
+        try:
+            data = self._get(
+                f"/api/sessions/{self._session_id}/events",
+                params={"after": self._last_event_id, "limit": max(1, min(limit, 50))},
+            )
+            events = data.get("events", [])
+        except Exception as exc:
+            self._log(f"poll_events failed: {exc}")
+            return []
 
         matched: list[dict[str, Any]] = []
-        unmatched: list[dict[str, Any]] = []
+        for evt in events:
+            self._last_event_id = evt.get("id") or self._last_event_id
+            payload = {"type": evt.get("type"), **(evt.get("payload") or {})}
+            ack = {
+                "ts": evt.get("ts", time.time()),
+                "role": payload.get("role"),
+                "status": "ok",
+                "payload": payload,
+            }
+            if predicate is None or predicate(ack):
+                matched.append(ack)
 
-        while self._incoming and len(matched) < limit:
-            item = self._incoming.popleft()
-            if predicate is None or predicate(item):
-                matched.append(item)
-            else:
-                unmatched.append(item)
-
-        if unmatched:
-            for item in reversed(unmatched):
-                self._incoming.appendleft(item)
+            self._record_event(evt)
 
         return matched
 
     def get_setting(self, key: str, default: Any = None) -> Any:
-        """Fetch the most recent setting pushed by the trainer."""
         return self._latest_settings.get(key, default)
 
     @property
@@ -178,63 +220,73 @@ class DummyServerInterface:
         return dict(self._latest_settings)
 
     # Internal helpers -----------------------------------------------
-    def _record_outgoing(self, payload: dict[str, Any]) -> None:
-        self._outgoing.append(payload)
-        self._log_message(f"queued {payload['type']} payload")
+    def _capture_session(self, session: dict[str, Any]) -> None:
+        self._session_id = session.get("session_id")
+        self._session_state = session.get("state") or self._session_state
+        self._latest_settings = session.get("latest_settings") or {}
+        users = session.get("users") or []
+        self._session_users = [
+            {"username": u.get("username"), "status": u.get("role"), "state": u.get("state", "connected")}
+            for u in users
+        ]
+        self._stats_by_user = session.get("stats_by_user") or {}
+        events = session.get("events") or []
+        if events:
+            self._last_event_id = events[-1].get("id", self._last_event_id)
+            for evt in events:
+                self._record_event(evt)
 
-    def _record_user_stats(self, payload: dict[str, Any]) -> None:
-        username = payload.get("username") or self._username or "Anonymous"
-        stats = payload.get("data")
-        if not isinstance(stats, dict):
+    def _record_event_string(self, message: str) -> None:
+        if not message:
             return
-
-        entry = {"ts": time.time(), **stats}
-        bucket = self._user_stats.setdefault(username, deque(maxlen=50))
-        bucket.append(entry)
-
-    def _enqueue_ack(self, payload: dict[str, Any]) -> None:
-        if not self._connected:
-            self._log_message("ignored ack because dummy server is stopped")
-            return
-
-        ack = {
-            "ts": time.time(),
-            "role": self._role,
-            "status": "stubbed",
-            "payload": payload,
-        }
-        self._incoming.append(ack)
-
-    def _log_message(self, msg: str) -> None:
-        if self._log is not None:
-            self._log(msg)
-
-    def _record_session_event(self, message: str) -> None:
         timestamp = time.strftime("%H:%M:%S")
-        self._session_events.append(f"[{timestamp}] {message}")
-        self._log_message(message)
+        self._events.append(f"[{timestamp}] {message}")
+        if len(self._events) > 50:
+            self._events = self._events[-50:]
 
-    def _add_or_update_user(self, username: str, status: str) -> None:
-        for user in self._session_users:
-            if user.get("username") == username:
-                user["status"] = status
-                return
-        self._session_users.append({"username": username, "status": status})
+    def _record_event(self, evt: dict[str, Any]) -> None:
+        """Format and store a server event, ignoring duplicates by id."""
 
-    def _ensure_pending_placeholder(self) -> None:
-        if not any(user.get("status") == "pending" for user in self._session_users):
-            self._session_users.append({"username": "Pending user", "status": "pending"})
+        event_id = evt.get("id")
+        if event_id and event_id in self._seen_event_ids_set:
+            return
 
-    def _replace_pending_with_self(self) -> bool:
-        for user in self._session_users:
-            if user.get("status") == "pending":
-                user["username"] = self._username
-                user["status"] = self._role
-                return True
-        return False
+        message = self._format_event(evt)
+        if not message:
+            return
 
-    def _rename_user(self, old_username: str, new_username: str) -> None:
-        for user in self._session_users:
-            if user.get("username") == old_username:
-                user["username"] = new_username
-                return
+        if event_id:
+            if len(self._seen_event_ids) == self._seen_event_ids.maxlen:
+                oldest = self._seen_event_ids.popleft()
+                self._seen_event_ids_set.discard(oldest)
+            self._seen_event_ids.append(event_id)
+            self._seen_event_ids_set.add(event_id)
+
+        self._record_event_string(message)
+
+    def _format_event(self, evt: dict[str, Any]) -> str:
+        evt_type = evt.get("type") or "event"
+        payload = evt.get("payload") or {}
+        username = payload.get("username") or payload.get("user") or "-"
+        phrase = payload.get("phrase")
+        if evt_type in {"command", "scold"} and phrase:
+            return f"{username} {evt_type}: {phrase}"
+        if evt_type == "settings":
+            return f"{username} updated settings"
+        if evt_type == "session_created":
+            return f"session created by {username}"
+        if evt_type == "user_joined":
+            return f"{username} joined"
+        if evt_type == "user_left":
+            return f"{username} left"
+        return evt_type
+
+    def _get(self, path: str, params: Optional[dict[str, Any]] = None) -> dict[str, Any]:
+        resp = requests.get(f"{self.base_url}{path}", params=params, timeout=self._timeout)
+        resp.raise_for_status()
+        return resp.json()
+
+    def _post(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        resp = requests.post(f"{self.base_url}{path}", json=payload, timeout=self._timeout)
+        resp.raise_for_status()
+        return resp.json()
