@@ -93,6 +93,34 @@ def _ensure_server(role: str = "trainer") -> DummyServerInterface:
     return _server_interface
 
 
+def start_server_session(session_label: str | None = None) -> dict:
+    """Start a new server session (stub)."""
+
+    server = _ensure_server()
+    return server.start_session(session_label=session_label)
+
+
+def join_server_session(session_id: str) -> dict:
+    """Join an existing server session (stub)."""
+
+    server = _ensure_server()
+    return server.join_session(session_id=session_id)
+
+
+def leave_server_session() -> dict:
+    """Leave the current server session (stub)."""
+
+    server = _ensure_server()
+    return server.leave_session()
+
+
+def get_server_session_details() -> dict:
+    """Return current session state for UI display."""
+
+    server = _ensure_server()
+    return server.get_session_details()
+
+
 def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str]) -> TrainerRuntime:
     logs = SessionLogManager("trainer")
 
