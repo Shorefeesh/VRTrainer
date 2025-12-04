@@ -3,6 +3,7 @@ from __future__ import annotations
 from typing import Any, Callable, MutableMapping
 import time
 import queue
+import uuid
 
 
 class DummyServerInterface:
@@ -23,6 +24,9 @@ class DummyServerInterface:
         self._role = "trainer" if role == "trainer" else "pet"
         self._log = log
         self._connected = False
+        self._session_id: str | None = None
+        self._session_state: str = "idle"
+        self._session_events: list[str] = []
 
         self._outgoing: list[dict[str, Any]] = []
         self._incoming: queue.SimpleQueue[dict[str, Any]] = queue.SimpleQueue()
@@ -62,6 +66,44 @@ class DummyServerInterface:
         self._record_outgoing(payload)
         self._enqueue_ack(payload)
 
+    # Session management stubs ---------------------------------------
+    def start_session(self, session_label: str | None = None) -> dict[str, Any]:
+        """Simulate hosting a new session and return details."""
+        self._session_id = session_label or f"session-{uuid.uuid4().hex[:8]}"
+        self._session_state = "hosting"
+        self._record_session_event(f"started session {self._session_id}")
+        return self.get_session_details()
+
+    def join_session(self, session_id: str) -> dict[str, Any]:
+        """Simulate joining an existing session and return details."""
+        cleaned = session_id.strip()
+        if not cleaned:
+            raise ValueError("Session code cannot be empty")
+
+        self._session_id = cleaned
+        self._session_state = "joined"
+        self._record_session_event(f"joined session {self._session_id}")
+        return self.get_session_details()
+
+    def leave_session(self) -> dict[str, Any]:
+        """Simulate leaving the current session and return details."""
+        if self._session_id:
+            self._record_session_event(f"left session {self._session_id}")
+        self._session_id = None
+        self._session_state = "idle"
+        return self.get_session_details()
+
+    def get_session_details(self) -> dict[str, Any]:
+        """Return a snapshot of current session info and history."""
+        return {
+            "connected": self._connected,
+            "role": self._role,
+            "session_id": self._session_id,
+            "state": self._session_state,
+            "latest_settings": dict(self._latest_settings),
+            "events": list(self._session_events[-10:]),
+        }
+
     # Server → trainer polling ---------------------------------------
     def poll_events(self, limit: int = 10) -> list[dict[str, Any]]:
         """Return up to ``limit`` queued acknowledgements."""
@@ -99,3 +141,8 @@ class DummyServerInterface:
     def _log_message(self, msg: str) -> None:
         if self._log is not None:
             self._log(msg)
+
+    def _record_session_event(self, message: str) -> None:
+        timestamp = time.strftime("%H:%M:%S")
+        self._session_events.append(f"[{timestamp}] {message}")
+        self._log_message(message)

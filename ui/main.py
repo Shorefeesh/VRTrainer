@@ -10,6 +10,7 @@ from .settings import SettingsTab
 from .trainer import TrainerTab
 from .pet import PetTab
 from .stats import StatsTab
+from .server import ServerTab
 
 
 def create_root() -> tk.Tk:
@@ -207,10 +208,12 @@ def build_ui(root: tk.Tk) -> None:
     )
 
     stats_tab = StatsTab(notebook)
+    server_tab = ServerTab(notebook)
 
     notebook.add(settings_tab, text="settings")
     notebook.add(trainer_tab, text="trainer")
     notebook.add(pet_tab, text="pet")
+    notebook.add(server_tab, text="server")
     notebook.add(stats_tab, text="stats")
 
     notebook.pack(fill="both", expand=True)
