@@ -27,20 +27,23 @@ class ServerTab(ttk.Frame):
         actions.grid(row=1, column=0, sticky="ew", padx=10, pady=6)
         actions.columnconfigure(0, weight=1)
 
+        self.username_entry = LabeledEntry(actions, "Username")
+        self.username_entry.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+
         self.session_label_entry = LabeledEntry(actions, "New session label")
-        self.session_label_entry.grid(row=0, column=0, sticky="ew", pady=(0, 6))
+        self.session_label_entry.grid(row=1, column=0, sticky="ew", pady=(0, 6))
 
         start_btn = ttk.Button(actions, text="Start session", command=self._start_session)
-        start_btn.grid(row=0, column=1, padx=(8, 0))
+        start_btn.grid(row=1, column=1, padx=(8, 0))
 
         self.session_code_entry = LabeledEntry(actions, "Join session code")
-        self.session_code_entry.grid(row=1, column=0, sticky="ew", pady=(0, 6))
+        self.session_code_entry.grid(row=2, column=0, sticky="ew", pady=(0, 6))
 
         join_btn = ttk.Button(actions, text="Join session", command=self._join_session)
-        join_btn.grid(row=1, column=1, padx=(8, 0))
+        join_btn.grid(row=2, column=1, padx=(8, 0))
 
         leave_btn = ttk.Button(actions, text="Leave session", command=self._leave_session)
-        leave_btn.grid(row=2, column=0, sticky="w", pady=(4, 0))
+        leave_btn.grid(row=3, column=0, sticky="w", pady=(4, 0))
 
         details = ttk.LabelFrame(self, text="Session details")
         details.grid(row=2, column=0, sticky="nsew", padx=10, pady=6)
@@ -58,9 +61,33 @@ class ServerTab(ttk.Frame):
         ttk.Label(details, textvariable=self.state_var).grid(row=1, column=1, sticky="w")
         ttk.Label(details, textvariable=self.session_id_var).grid(row=2, column=1, sticky="w")
 
+        ttk.Label(details, text="Users in session:").grid(row=3, column=0, sticky="w", pady=(8, 0))
+
+        users_frame = ttk.Frame(details)
+        users_frame.grid(row=4, column=0, columnspan=2, sticky="nsew", pady=(0, 4))
+        details.rowconfigure(4, weight=1)
+
+        self.users_tree = ttk.Treeview(
+            users_frame,
+            columns=("username", "status"),
+            show="headings",
+            height=4,
+        )
+        self.users_tree.heading("username", text="User")
+        self.users_tree.heading("status", text="Status")
+        self.users_tree.column("username", anchor="w", width=160)
+        self.users_tree.column("status", anchor="center", width=80)
+
+        users_scrollbar = ttk.Scrollbar(users_frame, orient="vertical", command=self.users_tree.yview)
+        self.users_tree.configure(yscrollcommand=users_scrollbar.set)
+        self.users_tree.grid(row=0, column=0, sticky="nsew")
+        users_scrollbar.grid(row=0, column=1, sticky="ns")
+        users_frame.columnconfigure(0, weight=1)
+        users_frame.rowconfigure(0, weight=1)
+
         log_frame = ScrollableFrame(details)
-        log_frame.grid(row=3, column=0, columnspan=2, sticky="nsew", pady=(8, 0))
-        details.rowconfigure(3, weight=1)
+        log_frame.grid(row=5, column=0, columnspan=2, sticky="nsew", pady=(4, 0))
+        details.rowconfigure(5, weight=1)
 
         ttk.Label(log_frame.container, text="Recent events:").grid(row=0, column=0, sticky="w")
         self.events_list = tk.Listbox(log_frame.container, height=6)
@@ -77,14 +104,16 @@ class ServerTab(ttk.Frame):
     # Button handlers -------------------------------------------------
     def _start_session(self) -> None:
         label = self.session_label_entry.variable.get().strip() or None
-        details = services.start_server_session(session_label=label)
+        username = self.username_entry.variable.get().strip() or None
+        details = services.start_server_session(session_label=label, username=username)
         self._display_message("Started a new session.")
         self._update_from_details(details)
 
     def _join_session(self) -> None:
         try:
             code = self.session_code_entry.variable.get()
-            details = services.join_server_session(session_id=code)
+            username = self.username_entry.variable.get().strip() or None
+            details = services.join_server_session(session_id=code, username=username)
             self._display_message("Joined existing session.")
             self._update_from_details(details)
         except ValueError as exc:
@@ -113,6 +142,20 @@ class ServerTab(ttk.Frame):
 
         session_id = details.get("session_id") or "-"
         self.session_id_var.set(session_id)
+
+        if not self.username_entry.variable.get().strip():
+            username = details.get("username") or ""
+            self.username_entry.variable.set(username)
+
+        users = details.get("session_users") or []
+        self.users_tree.delete(*self.users_tree.get_children())
+        if users:
+            for user in users:
+                username = user.get("username") or "-"
+                status = user.get("status") or "pending"
+                self.users_tree.insert("", "end", values=(username, status))
+        else:
+            self.users_tree.insert("", "end", values=("No users", "-"))
 
         events = details.get("events") or []
         self.events_list.delete(0, "end")
