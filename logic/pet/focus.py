@@ -183,6 +183,16 @@ class FocusFeature:
             self._log(
                 f"event=shock feature=focus runtime=pet meter={self._focus_meter:.3f} threshold={self._shock_threshold:.3f} strength={strength}"
             )
+            self._send_stats(
+                {
+                    "event": "shock",
+                    "runtime": "pet",
+                    "feature": "focus",
+                    "meter": self._focus_meter,
+                    "threshold": self._shock_threshold,
+                    "strength": strength,
+                }
+            )
         except Exception:
             return
 
@@ -204,6 +214,15 @@ class FocusFeature:
         self._log(
             f"event=sample feature=focus runtime=pet meter={self._focus_meter:.3f} threshold={self._shock_threshold:.3f}"
         )
+        self._send_stats(
+            {
+                "event": "sample",
+                "runtime": "pet",
+                "feature": "focus",
+                "meter": self._focus_meter,
+                "threshold": self._shock_threshold,
+            }
+        )
 
     @staticmethod
     def _normalise(text: str) -> str:
@@ -220,4 +239,14 @@ class FocusFeature:
                 chars.append(" ")
 
         return " ".join("".join(chars).split())
+
+    def _send_stats(self, stats: dict[str, object]) -> None:
+        server = self.server
+        if server is None:
+            return
+
+        try:
+            server.send_stats(stats)
+        except Exception:
+            return
 
