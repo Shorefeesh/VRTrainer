@@ -43,6 +43,8 @@ def build_ui(root: tk.Tk) -> None:
     def on_trainer_settings_changed(settings: dict) -> None:
         trainer_profile.update_profile_from_settings(config, settings)
         save_config(config)
+        services.notify_profile_updated(settings)
+        server_tab.set_profile_options(trainer_profile.list_profile_names(config))
         if services.is_trainer_running():
             services.update_trainer_feature_states(settings)
         # Mirror trainer-controlled pet feature toggles into the pet tab and running pet runtime.
@@ -102,14 +104,19 @@ def build_ui(root: tk.Tk) -> None:
             feature_pronouns=current.get("feature_pronouns", False),
         )
         save_config(config)
+        server_tab.set_profile_options(trainer_profile.list_profile_names(config))
 
     def on_trainer_profile_renamed(old_name: str, new_name: str) -> None:
         if trainer_profile.rename_profile(config, old_name, new_name):
             save_config(config)
+            services.rename_profile_assignment(old_name, new_name)
+            server_tab.set_profile_options(trainer_profile.list_profile_names(config))
 
     def on_trainer_profile_deleted(profile_name: str) -> None:
         if trainer_profile.delete_profile(config, profile_name):
             save_config(config)
+            services.remove_profile_assignments(profile_name)
+            server_tab.set_profile_options(trainer_profile.list_profile_names(config))
 
     trainer_tab = TrainerTab(
         notebook,
@@ -262,18 +269,49 @@ def build_ui(root: tk.Tk) -> None:
             "pishock": _format_pishock_status(pishock_status, running),
             "whisper": whisper_status,
         }
+        username = services.get_server_username()
+        if username:
+            status["username"] = username
 
         services.publish_runtime_status(role, status)
         return status
 
     stats_tab = StatsTab(notebook)
+    def on_pet_profile_selected(pet_client_id: str, profile_name: str | None) -> None:
+        if not profile_name:
+            services.assign_profile_to_pet(pet_client_id, None, None)
+            return
+
+        settings = trainer_profile.get_profile(config, profile_name)
+        if settings is None:
+            services.assign_profile_to_pet(pet_client_id, None, None)
+            return
+        services.assign_profile_to_pet(pet_client_id, profile_name, settings)
+
     server_tab = ServerTab(
         notebook,
         runtime_status_provider=runtime_status_provider,
         on_join_trainer=_start_trainer_runtime,
         on_join_pet=_start_pet_runtime,
         on_leave_session=_stop_all_runtimes,
+        on_pet_profile_selected=on_pet_profile_selected,
     )
+    server_tab.set_profile_options(trainer_profile.list_profile_names(config))
+
+    # Persist server username across runs.
+    server_config = config.setdefault("server", {})
+    stored_username = server_config.get("username") or ""
+    if stored_username:
+        server_tab.username_entry.variable.set(stored_username)
+        services.set_server_username(stored_username)
+
+    def _on_server_username_changed(*_) -> None:
+        username = server_tab.username_entry.variable.get().strip()
+        server_config["username"] = username or None
+        save_config(config)
+        services.set_server_username(username or None)
+
+    server_tab.username_entry.variable.trace_add("write", _on_server_username_changed)
 
     notebook.add(trainer_tab, text="trainer")
     notebook.add(pet_tab, text="pet")

@@ -102,7 +102,7 @@ class TrainerScoldingFeature:
 
         if any(phrase in normalised for phrase in phrases):
             try:
-                self.server.send_scold(normalised, {"feature": "scolding"})
+                self.server.send_command(normalised, {"feature": "scolding"})
                 self._log("event=scold feature=scolding runtime=trainer text=" + normalised)
                 self._pulse_command_flag("Trainer/CommandScold")
             except Exception:

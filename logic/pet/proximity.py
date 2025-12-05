@@ -252,6 +252,6 @@ class ProximityFeature:
             return
 
         try:
-            server.send_stats(stats)
+            server.send_logs(stats)
         except Exception:
             return

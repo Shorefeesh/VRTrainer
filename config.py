@@ -36,6 +36,9 @@ def _default_config() -> Dict[str, Any]:
         "settings": {
             "input_device": None,
         },
+        "server": {
+            "username": None,
+        },
         "trainer": {
             "active_profile": None,
             "profiles": {},

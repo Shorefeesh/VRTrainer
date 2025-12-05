@@ -149,7 +149,7 @@ class ScoldingFeature:
             predicate=lambda evt: (
                 isinstance(evt, dict)
                 and isinstance(evt.get("payload"), dict)
-                and evt.get("payload", {}).get("type") == "scold"
+                and evt.get("payload", {}).get("type") == "command"
                 and evt.get("payload", {}).get("meta", {}).get("feature") == "scolding"
                 and self._contains_scolding(evt.get("payload", {}).get("phrase", ""))
             ),
