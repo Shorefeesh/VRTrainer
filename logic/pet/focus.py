@@ -147,9 +147,9 @@ class FocusFeature:
 
     def _update_meter(self, state: "_TrainerFocusState", dt: float) -> None:
         focused = self.osc.get_bool_param("Trainer/EyeLeft", default=True) \
-          or self.osc.get_bool_param("Trainer/EyeFarLeft", default=True) \
+          or self.osc.get_bool_param("Trainer/EyeFarLeft", default=False) \
           or self.osc.get_bool_param("Trainer/EyeRight", default=True) \
-          or self.osc.get_bool_param("Trainer/EyeFarRight", default=True)
+          or self.osc.get_bool_param("Trainer/EyeFarRight", default=False)
         delta = (self._fill_rate if focused else -self._drain_rate) * dt
         state.focus_meter = max(0.0, min(1.0, state.focus_meter + delta))
 
