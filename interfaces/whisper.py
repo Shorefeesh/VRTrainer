@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, List, Optional, Any
 
+import logging
 
 _SHARED_WHISPER_MODEL: Any = None
 _SHARED_WHISPER_BACKEND: Optional[str] = None
@@ -289,19 +290,30 @@ class WhisperInterface:
         # turn limits how much buffered audio builds up.
         block_duration = 3.0  # seconds per transcription window
 
+        
+        
         # Resolve device: ``None`` lets sounddevice pick the default.
-        device = None
-        if self.input_device:
-            # sounddevice can accept device names directly; fall back
-            # to default if the name is not recognised.
-            device = self.input_device
+        try:
+            if self.input_device:
+                # sounddevice can accept device names directly; fall back
+                # to default if the name is not recognised.
+                all_devices = sd.query_devices()
+                selected_devices = [device for device in all_devices if device['name'] == self.input_device]
+                if selected_devices:
+                    # TODO: Select the first one. Fix later, lol smiley face
+                    device_index = selected_devices[0]['index']
+                else:
+                    device_index = None
+        except Exception as e:
+            logging.error(e)
+            device = None
 
         try:  # pragma: no cover - environment/hardware specific
             with sd.InputStream(
                 samplerate=samplerate,
                 channels=1,
                 dtype="float32",
-                device=device,
+                device=device_index,
                 blocksize=0,
                 callback=self._make_audio_callback(),
             ):
@@ -387,7 +399,8 @@ class WhisperInterface:
 
                     with self._lock:
                         self._transcript.append(_TranscriptChunk(text=text))
-        except Exception:
+        except Exception as e:
+            logging.exception("Unexpected exception occurred")
             # If audio capture fails (no device, permission issue, etc.),
             # just exit the worker loop; the interface will stay alive
             # but no text will be produced.
