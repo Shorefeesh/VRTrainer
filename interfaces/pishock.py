@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from typing import Optional
 import pishock
+import logging
 
 
 class PiShockInterface:
@@ -25,6 +26,8 @@ class PiShockInterface:
         self.api_key: Optional[str] = api_key
         self.share_code: Optional[str] = share_code
 
+        self.logger = logging.getLogger(__name__)
+
         # Normalise role so unexpected values fall back to trainer
         self._role = "pet" if role == "pet" else "trainer"
         # Only the pet runtime should ever drive the real PiShock/OSC
@@ -43,7 +46,7 @@ class PiShockInterface:
             self._connected = False
             self._api = None
             self._shocker = None
-            print("PiShock not enabled")
+            self.logger.info("PiShock not enabled")
             return
 
         if not self.username or not self.api_key or not self.share_code:
@@ -51,7 +54,7 @@ class PiShockInterface:
             self._connected = False
             self._api = None
             self._shocker = None
-            print("PiShock no details")
+            self.logger.info("PiShock no details")
             return
 
         api = pishock.PiShockAPI(username=self.username, api_key=self.api_key)
@@ -61,7 +64,7 @@ class PiShockInterface:
             self._connected = False
             self._api = None
             self._shocker = None
-            print("PiShock verify fail")
+            self.logger.info("PiShock verify fail")
             return
 
         self._api = api
@@ -69,7 +72,7 @@ class PiShockInterface:
 
         self._shocker = api.shocker(self.share_code)
 
-        print("PiShock verify success")
+        self.logger.info("PiShock verify success")
 
     def stop(self) -> None:
         """Tear down connection or cleanup resources."""
@@ -97,10 +100,10 @@ class PiShockInterface:
             duration: Shock duration in seconds. Can be a float in the
                 0-1 range or an integer 0–15 for whole seconds.
         """
-        print("PiShock sending shock start")
+        self.logger.info("PiShock sending shock start")
 
         if not self._enabled:
-            print("PiShock not enabled")
+            self.logger.info("PiShock not enabled")
             return
 
         # Normalise inputs to avoid type errors in the PiShock library
@@ -115,23 +118,23 @@ class PiShockInterface:
         self._send_shock_osc(strength=safe_strength, duration=safe_duration)
 
         if not self._connected:
-            print("PiShock not connected")
+            self.logger.info("PiShock not connected")
             return
 
         shocker = self._shocker
         if shocker is None:
-            print("PiShock no shocker")
+            self.logger.info("PiShock no shocker")
             return
 
-        print("PiShock sending shock start2")
+        self.logger.info("PiShock sending shock start2")
 
         try:
             shocker.shock(duration=safe_duration, intensity=safe_strength)
-            print("PiShock sending shock done")
+            self.logger.info("PiShock sending shock done")
         except Exception as exc:
             # Surface the error so users can see why the shock failed,
             # but avoid crashing the caller.
-            print(f"PiShock sending shock failed: {exc}")
+            self.logger.info(f"PiShock sending shock failed: {exc}")
 
     def send_vibrate(
         self,
