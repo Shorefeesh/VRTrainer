@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Optional
+from dataclasses import dataclass, field
+from typing import Optional, Dict, List
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
@@ -20,52 +21,33 @@ class FocusFeature:
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
         server: RemoteServerInterface | None = None,
-        *,
-        scaling: Optional[dict[str, float]] = None,
         logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
         self.server = server
-        self._running = False
-        self._enabled = True
         self._logger = logger
+        self._running = False
 
         import threading
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
+        self._state_by_trainer: Dict[str, _TrainerFocusState] = {}
+
         # Focus meter state and tunables.
-        self._focus_meter: float = 1.0
         self._poll_interval: float = 0.1
         self._fill_rate: float = 0.2
         self._drain_rate: float = 0.02
         self._shock_threshold: float = 0.2
 
         self._base_cooldown_seconds: float = 5.0
-        self._cooldown_seconds: float = self._base_cooldown_seconds
-        self._cooldown_until: float = 0.0
 
         self._base_shock_strength_min: float = 20.0
         self._base_shock_strength_max: float = 80.0
-        self._shock_strength_min: float = self._base_shock_strength_min
-        self._shock_strength_max: float = self._base_shock_strength_max
         self._base_shock_duration: float = 0.5
-        self._shock_duration: float = self._base_shock_duration
-
-        self._last_tick: float | None = None
-        self._last_sample_log: float = 0.0
-        self._last_command_trainer: str | None = None
-
         self._name_penalty: float = 0.15
-
-        self.set_scaling(
-            delay_scale=1.0,
-            cooldown_scale=(scaling or {}).get("cooldown_scale", 1.0),
-            duration_scale=(scaling or {}).get("duration_scale", 1.0),
-            strength_scale=(scaling or {}).get("strength_scale", 1.0),
-        )
 
         self._log("event=init feature=focus runtime=pet")
 
@@ -102,61 +84,57 @@ class FocusFeature:
         self._log("event=stop feature=focus runtime=pet")
 
     # Internal helpers -------------------------------------------------
-    def set_scaling(
-        self,
-        *,
-        delay_scale: float = 1.0,
-        cooldown_scale: float = 1.0,
-        duration_scale: float = 1.0,
-        strength_scale: float = 1.0,
-    ) -> None:
-        self._cooldown_seconds = max(0.0, self._base_cooldown_seconds * cooldown_scale)
-        self._shock_duration = max(0.0, self._base_shock_duration * duration_scale)
-        self._shock_strength_min = max(0.0, self._base_shock_strength_min * strength_scale)
-        self._shock_strength_max = max(self._shock_strength_min, self._base_shock_strength_max * strength_scale)
-
     def _worker_loop(self) -> None:
         import time
 
-        self._last_tick = time.time()
-
         while not self._stop_event.is_set():
             now = time.time()
-            dt = max(0.0, now - (self._last_tick or now))
-            self._last_tick = now
 
-            if not self._enabled:
+            active_configs = self._active_trainer_configs()
+            self._prune_inactive_states(active_configs)
+
+            if not active_configs:
                 if self._stop_event.wait(self._poll_interval):
                     break
                 continue
 
-            self._apply_remote_penalties()
-            self._update_meter(dt)
-            self._log_sample(now)
+            penalties = self._collect_focus_events()
 
-            if self._should_shock(now):
-                self._deliver_correction()
-                self._cooldown_until = now + self._cooldown_seconds
+            for trainer_id, config in active_configs.items():
+                state = self._state_by_trainer.setdefault(trainer_id, _TrainerFocusState(now))
+                dt = max(0.0, now - state.last_tick)
+                state.last_tick = now
+
+                self._apply_remote_penalties_for_trainer(trainer_id, state, penalties.get(trainer_id, []))
+                self._update_meter(state, dt)
+                self._log_sample(now, trainer_id, state)
+
+                if self._should_shock(now, state):
+                    self._deliver_correction(trainer_id, state, config)
+                    state.cooldown_until = now + self._cooldown_seconds(config)
 
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def set_enabled(self, enabled: bool) -> None:
-        self._enabled = bool(enabled)
+    def _active_trainer_configs(self) -> Dict[str, dict]:
+        server = self.server
+        if server is None:
+            return {}
 
-    def _update_meter(self, dt: float) -> None:
-        focused = self.osc.get_bool_param("Trainer/Focus", default=False)
-        delta = (self._fill_rate if focused else -self._drain_rate) * dt
-        self._focus_meter = max(0.0, min(1.0, self._focus_meter + delta))
+        configs = getattr(server, "latest_settings_by_trainer", lambda: {})()
+        return {tid: cfg for tid, cfg in configs.items() if cfg.get("feature_focus")}
 
-    def _apply_remote_penalties(self) -> None:
-        """Apply penalties based on trainer-issued focus commands."""
+    def _prune_inactive_states(self, active_configs: Dict[str, dict]) -> None:
+        for trainer_id in list(self._state_by_trainer.keys()):
+            if trainer_id not in active_configs:
+                self._state_by_trainer.pop(trainer_id, None)
 
+    def _collect_focus_events(self) -> Dict[str, List[dict]]:
         if self.server is None:
-            return
+            return {}
 
         events = self.server.poll_events(
-            limit=5,
+            limit=10,
             predicate=lambda evt: (
                 isinstance(evt, dict)
                 and isinstance(evt.get("payload"), dict)
@@ -165,36 +143,50 @@ class FocusFeature:
             ),
         )
 
+        grouped: Dict[str, List[dict]] = {}
+        for event in events:
+            trainer_id = str(event.get("from_client") or "")
+            if trainer_id:
+                grouped.setdefault(trainer_id, []).append(event)
+        return grouped
+
+    def _update_meter(self, state: "_TrainerFocusState", dt: float) -> None:
+        focused = self.osc.get_bool_param("Trainer/Focus", default=False)
+        delta = (self._fill_rate if focused else -self._drain_rate) * dt
+        state.focus_meter = max(0.0, min(1.0, state.focus_meter + delta))
+
+    def _apply_remote_penalties_for_trainer(self, trainer_id: str, state: "_TrainerFocusState", events: List[dict]) -> None:
         if not events:
             return
 
-        for event in events:
-            self._last_command_trainer = str(event.get("from_client") or "") or self._last_command_trainer
-            self._focus_meter = max(0.0, self._focus_meter - self._name_penalty)
+        state.last_command_trainer = trainer_id or state.last_command_trainer
+        for _event in events:
+            state.focus_meter = max(0.0, state.focus_meter - self._name_penalty)
 
-    def _should_shock(self, now: float) -> bool:
-        if now < self._cooldown_until:
+    def _should_shock(self, now: float, state: "_TrainerFocusState") -> bool:
+        if now < state.cooldown_until:
             return False
-        return self._focus_meter <= self._shock_threshold
+        return state.focus_meter <= self._shock_threshold
 
-    def _deliver_correction(self) -> None:
+    def _deliver_correction(self, trainer_id: str, state: "_TrainerFocusState", config: dict) -> None:
         try:
-            deficit = (self._shock_threshold - self._focus_meter) / self._shock_threshold
-            strength = max(self._shock_strength_min, min(self._shock_strength_max, int(deficit * self._shock_strength_max)))
-            self.pishock.send_shock(strength=strength, duration=self._shock_duration)
+            shock_min, shock_max, shock_duration = self._shock_params(config)
+            deficit = (self._shock_threshold - state.focus_meter) / self._shock_threshold
+            strength = max(shock_min, min(shock_max, int(deficit * shock_max)))
+            self.pishock.send_shock(strength=strength, duration=shock_duration)
             self._log(
-                f"event=shock feature=focus runtime=pet meter={self._focus_meter:.3f} threshold={self._shock_threshold:.3f} strength={strength}"
+                f"event=shock feature=focus runtime=pet trainer={trainer_id[:8]} meter={state.focus_meter:.3f} threshold={self._shock_threshold:.3f} strength={strength}"
             )
             self._send_stats(
                 {
                     "event": "shock",
                     "runtime": "pet",
-                "feature": "focus",
-                "meter": self._focus_meter,
-                "threshold": self._shock_threshold,
-                "strength": strength,
-            },
-            target_client=self._last_command_trainer,
+                    "feature": "focus",
+                    "meter": state.focus_meter,
+                    "threshold": self._shock_threshold,
+                    "strength": strength,
+                },
+                target_client=trainer_id,
             )
         except Exception:
             return
@@ -209,24 +201,24 @@ class FocusFeature:
         except Exception:
             return
 
-    def _log_sample(self, now: float) -> None:
-        if now - self._last_sample_log < 1.0:
+    def _log_sample(self, now: float, trainer_id: str, state: "_TrainerFocusState") -> None:
+        if now - state.last_sample_log < 1.0:
             return
 
-        self._last_sample_log = now
+        state.last_sample_log = now
         self._log(
-            f"event=sample feature=focus runtime=pet meter={self._focus_meter:.3f} threshold={self._shock_threshold:.3f}"
+            f"event=sample feature=focus runtime=pet trainer={trainer_id[:8]} meter={state.focus_meter:.3f} threshold={self._shock_threshold:.3f}"
         )
         self._send_stats(
             {
                 "event": "sample",
                 "runtime": "pet",
                 "feature": "focus",
-                "meter": self._focus_meter,
+                "meter": state.focus_meter,
                 "threshold": self._shock_threshold,
             },
-            broadcast_trainers=True,
-            )
+            target_client=trainer_id,
+        )
 
     @staticmethod
     def _normalise(text: str) -> str:
@@ -253,3 +245,39 @@ class FocusFeature:
             server.send_logs(stats, target_clients=[target_client] if target_client else None, broadcast_trainers=broadcast_trainers)
         except Exception:
             return
+
+    def _shock_params(self, config: dict) -> tuple[float, float, float]:
+        scaling = self._scaling_from_config(config)
+        shock_min = max(0.0, self._base_shock_strength_min * scaling["strength_scale"])
+        shock_max = max(shock_min, self._base_shock_strength_max * scaling["strength_scale"])
+        shock_duration = max(0.0, self._base_shock_duration * scaling["duration_scale"])
+        return shock_min, shock_max, shock_duration
+
+    def _cooldown_seconds(self, config: dict) -> float:
+        scaling = self._scaling_from_config(config)
+        return max(0.0, self._base_cooldown_seconds * scaling["cooldown_scale"])
+
+    @staticmethod
+    def _scaling_from_config(config: dict) -> dict[str, float]:
+        def _safe(key: str) -> float:
+            try:
+                val = float(config.get(key, 1.0))
+            except Exception:
+                val = 1.0
+            return max(0.0, min(2.0, val))
+
+        return {
+            "delay_scale": _safe("delay_scale"),
+            "cooldown_scale": _safe("cooldown_scale"),
+            "duration_scale": _safe("duration_scale"),
+            "strength_scale": _safe("strength_scale"),
+        }
+
+
+@dataclass
+class _TrainerFocusState:
+    last_tick: float = field(default_factory=lambda: 0.0)
+    focus_meter: float = 1.0
+    cooldown_until: float = 0.0
+    last_sample_log: float = 0.0
+    last_command_trainer: str | None = None

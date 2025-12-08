@@ -57,46 +57,11 @@ def build_ui(root: tk.Tk) -> None:
         session_tab.set_profile_options(trainer_profile.list_profile_names(config))
         if services.is_trainer_running():
             services.update_trainer_feature_states(settings)
-        # Mirror trainer-controlled pet feature toggles into the pet tab and running pet runtime.
-        pet_tab.set_feature_flags(
-            feature_focus=settings.get("feature_focus", False),
-            feature_proximity=settings.get("feature_proximity", False),
-            feature_tricks=settings.get("feature_tricks", False),
-            feature_scolding=settings.get("feature_scolding", False),
-            feature_ear_tail=settings.get("feature_ear_tail", False),
-            feature_pronouns=settings.get("feature_pronouns", False),
-        )
-        if services.is_pet_running():
-            services.update_pet_feature_states(
-                {
-                    "feature_focus": settings.get("feature_focus"),
-                    "feature_proximity": settings.get("feature_proximity"),
-                    "feature_tricks": settings.get("feature_tricks"),
-                    "feature_scolding": settings.get("feature_scolding"),
-                    "feature_ear_tail": settings.get("feature_ear_tail"),
-                    "feature_pronouns": settings.get("feature_pronouns"),
-                    "delay_scale": settings.get("delay_scale"),
-                    "cooldown_scale": settings.get("cooldown_scale"),
-                    "duration_scale": settings.get("duration_scale"),
-                    "strength_scale": settings.get("strength_scale"),
-                    "names": settings.get("names"),
-                    "command_words": settings.get("command_words"),
-                    "scolding_words": settings.get("scolding_words"),
-                }
-            )
 
     def on_trainer_profile_selected(profile_name: str) -> None:
         if not profile_name:
             trainer_profile.set_active_profile_name(config, None)
             save_config(config)
-            pet_tab.set_feature_flags(
-                feature_focus=False,
-                feature_proximity=False,
-                feature_tricks=False,
-                feature_scolding=False,
-                feature_ear_tail=False,
-                feature_pronouns=False,
-            )
             return
 
         trainer_profile.set_active_profile_name(config, profile_name)
@@ -105,14 +70,6 @@ def build_ui(root: tk.Tk) -> None:
             current = trainer_profile.default_profile_settings(profile_name)
             trainer_profile.update_profile_from_settings(config, current)
         trainer_tab.apply_profile_settings(current)
-        pet_tab.set_feature_flags(
-            feature_focus=current.get("feature_focus", False),
-            feature_proximity=current.get("feature_proximity", False),
-            feature_tricks=current.get("feature_tricks", False),
-            feature_scolding=current.get("feature_scolding", False),
-            feature_ear_tail=current.get("feature_ear_tail", False),
-            feature_pronouns=current.get("feature_pronouns", False),
-        )
         save_config(config)
         session_tab.set_profile_options(trainer_profile.list_profile_names(config))
 
@@ -177,39 +134,7 @@ def build_ui(root: tk.Tk) -> None:
     pet_settings_conf = config.get("pet") or {}
     if pet_settings_conf:
         pet_tab.apply_settings(pet_settings_conf)
-    # Keep pet feature status aligned with the currently active trainer profile.
-    current_trainer_settings = trainer_tab.collect_settings()
-    pet_tab.set_feature_flags(
-        feature_focus=current_trainer_settings.get("feature_focus", False),
-        feature_proximity=current_trainer_settings.get("feature_proximity", False),
-        feature_tricks=current_trainer_settings.get("feature_tricks", False),
-        feature_scolding=current_trainer_settings.get("feature_scolding", False),
-        feature_ear_tail=current_trainer_settings.get("feature_ear_tail", False),
-        feature_pronouns=current_trainer_settings.get("feature_pronouns", False),
-    )
-
     # Runtime orchestration now lives alongside session joins.
-    def _compose_pet_runtime_settings() -> dict:
-        pet_settings = pet_tab.collect_settings()
-        trainer_settings = trainer_tab.collect_settings()
-        pet_settings.update(
-            {
-                "feature_focus": trainer_settings.get("feature_focus"),
-                "feature_proximity": trainer_settings.get("feature_proximity"),
-                "feature_tricks": trainer_settings.get("feature_tricks"),
-                "feature_scolding": trainer_settings.get("feature_scolding"),
-                "feature_ear_tail": trainer_settings.get("feature_ear_tail"),
-                "feature_pronouns": trainer_settings.get("feature_pronouns"),
-                "delay_scale": trainer_settings.get("delay_scale"),
-                "cooldown_scale": trainer_settings.get("cooldown_scale"),
-                "duration_scale": trainer_settings.get("duration_scale"),
-                "strength_scale": trainer_settings.get("strength_scale"),
-                "names": trainer_settings.get("names"),
-                "command_words": trainer_settings.get("command_words"),
-                "scolding_words": trainer_settings.get("scolding_words"),
-            }
-        )
-        return pet_settings
 
     def _start_trainer_runtime() -> None:
         services.stop_pet()
@@ -219,7 +144,7 @@ def build_ui(root: tk.Tk) -> None:
 
     def _start_pet_runtime() -> None:
         services.stop_trainer()
-        pet_settings = _compose_pet_runtime_settings()
+        pet_settings = pet_tab.collect_settings()
         input_device = pet_tab.input_device
         services.start_pet(pet_settings, input_device)
 

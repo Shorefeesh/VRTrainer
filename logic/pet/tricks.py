@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import time
+from dataclasses import dataclass
+from typing import Dict, List
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
@@ -17,11 +19,19 @@ class _PendingCommand:
         self.deadline = deadline
 
 
+@dataclass
+class _TrainerTrickState:
+    pending: _PendingCommand | None = None
+    cooldown_until: float = 0.0
+
+
 class TricksFeature:
     """Pet tricks feature.
 
-    Runs on the pet client: detects trainer-issued voice commands via
-    local Whisper and validates completion using OSC pose parameters.
+    Runs on the pet client: reacts to trainer-issued commands delivered
+    over the server and validates completion locally via OSC. The
+    feature iterates per trainer config to allow multiple trainers in a
+    session without local toggles.
     """
 
     def __init__(
@@ -29,43 +39,26 @@ class TricksFeature:
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
         server: RemoteServerInterface | None = None,
-        *,
-        names: list[str] | None = None,
-        scaling: dict[str, float] | None = None,
         logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
         self.server = server
-        self._running = False
-        self._enabled = True
         self._logger = logger
+        self._running = False
 
         import threading
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        self._pet_names = [self._normalise_text(name) for name in (names or []) if self._normalise_text(name)]
+        self._state_by_trainer: Dict[str, _TrainerTrickState] = {}
 
         self._poll_interval: float = 0.2
         self._base_command_timeout: float = 5.0
-        self._command_timeout: float = self._base_command_timeout
         self._base_cooldown_seconds: float = 2.0
-        self._cooldown_seconds: float = self._base_cooldown_seconds
-        self._cooldown_until: float = 0.0
         self._base_shock_strength: float = 35
-        self._shock_strength: float = self._base_shock_strength
         self._base_shock_duration: float = 0.5
-        self._shock_duration: float = self._base_shock_duration
-        self.set_scaling(
-            delay_scale=(scaling or {}).get("delay_scale", 1.0),
-            cooldown_scale=(scaling or {}).get("cooldown_scale", 1.0),
-            duration_scale=(scaling or {}).get("duration_scale", 1.0),
-            strength_scale=(scaling or {}).get("strength_scale", 1.0),
-        )
-
-        self._pending: _PendingCommand | None = None
 
         self._command_phrases: dict[str, list[str]] = {
             "paw": ["paw", "poor", "pour", "pore"],
@@ -111,61 +104,59 @@ class TricksFeature:
         self._log("event=stop feature=tricks runtime=pet")
 
     # Internal helpers -------------------------------------------------
-    def set_scaling(
-        self,
-        *,
-        delay_scale: float = 1.0,
-        cooldown_scale: float = 1.0,
-        duration_scale: float = 1.0,
-        strength_scale: float = 1.0,
-    ) -> None:
-        self._command_timeout = max(0.0, self._base_command_timeout * delay_scale)
-        self._cooldown_seconds = max(0.0, self._base_cooldown_seconds * cooldown_scale)
-        self._shock_strength = max(0.0, self._base_shock_strength * strength_scale)
-        self._shock_duration = max(0.0, self._base_shock_duration * duration_scale)
-
     def _worker_loop(self) -> None:
-        import time
-
         while not self._stop_event.is_set():
             now = time.time()
 
-            if not self._enabled:
-                self._pending = None
+            active_configs = self._active_trainer_configs()
+            self._prune_inactive_states(active_configs)
+
+            if not active_configs:
                 if self._stop_event.wait(self._poll_interval):
                     break
                 continue
 
-            self._maybe_start_command(now)
+            command_events = self._collect_trick_events()
 
-            if self._pending is not None:
-                if self._is_command_completed(self._pending.name):
-                    self._log(
-                        f"event=command_success feature=tricks runtime=pet name={self._pending.name} duration={now - self._pending.started_at:.2f}"
-                    )
-                    self._deliver_completion_signal()
-                    self._pending = None
-                elif now >= self._pending.deadline and now >= self._cooldown_until:
-                    self._deliver_failure()
-                    self._cooldown_until = now + self._cooldown_seconds
-                    self._pending = None
+            for trainer_id, config in active_configs.items():
+                state = self._state_by_trainer.setdefault(trainer_id, _TrainerTrickState())
+
+                if state.pending is None and command_events.get(trainer_id):
+                    self._maybe_start_command(now, state, command_events[trainer_id][0], config, trainer_id)
+
+                if state.pending is not None:
+                    if self._is_command_completed(state.pending.name):
+                        self._log(
+                            f"event=command_success feature=tricks runtime=pet trainer={trainer_id[:8]} name={state.pending.name} duration={now - state.pending.started_at:.2f}"
+                        )
+                        self._deliver_completion_signal()
+                        state.pending = None
+                    elif now >= state.pending.deadline and now >= state.cooldown_until:
+                        self._deliver_failure(trainer_id, config, state.pending)
+                        state.cooldown_until = now + self._cooldown_seconds(config)
+                        state.pending = None
 
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def set_enabled(self, enabled: bool) -> None:
-        self._enabled = bool(enabled)
-        if not self._enabled:
-            self._pending = None
+    def _active_trainer_configs(self) -> Dict[str, dict]:
+        server = self.server
+        if server is None:
+            return {}
+        configs = getattr(server, "latest_settings_by_trainer", lambda: {})()
+        return {tid: cfg for tid, cfg in configs.items() if cfg.get("feature_tricks")}
 
-    def _maybe_start_command(self, now: float) -> None:
-        """Start a new trick command if a trainer event was received."""
+    def _prune_inactive_states(self, active_configs: Dict[str, dict]) -> None:
+        for trainer_id in list(self._state_by_trainer.keys()):
+            if trainer_id not in active_configs:
+                self._state_by_trainer.pop(trainer_id, None)
 
+    def _collect_trick_events(self) -> Dict[str, List[dict]]:
         if self.server is None:
-            return
+            return {}
 
         events = self.server.poll_events(
-            limit=5,
+            limit=10,
             predicate=lambda evt: (
                 isinstance(evt, dict)
                 and isinstance(evt.get("payload"), dict)
@@ -174,24 +165,30 @@ class TricksFeature:
             ),
         )
 
+        grouped: Dict[str, List[dict]] = {}
         for event in events:
-            payload = event.get("payload", {})
-            name = payload.get("phrase")
-            if not name:
-                continue
+            trainer_id = str(event.get("from_client") or "")
+            if trainer_id:
+                grouped.setdefault(trainer_id, []).append(event)
+        return grouped
 
-            normalised = self._normalise_text(str(name))
-            if normalised not in self._command_phrases:
-                continue
+    def _maybe_start_command(self, now: float, state: _TrainerTrickState, event: dict, config: dict, trainer_id: str) -> None:
+        payload = event.get("payload", {})
+        name = payload.get("phrase")
+        if not name:
+            return
 
-            self._pending = _PendingCommand(
-                name=normalised,
-                started_at=now,
-                deadline=now + self._command_timeout,
-            )
-            self._log(f"event=command_start feature=tricks runtime=pet name={normalised}")
-            self._deliver_task_start_signal()
-            break
+        normalised = self._normalise_text(str(name))
+        if normalised not in self._command_phrases:
+            return
+
+        state.pending = _PendingCommand(
+            name=normalised,
+            started_at=now,
+            deadline=now + self._command_timeout(config),
+        )
+        self._log(f"event=command_start feature=tricks runtime=pet trainer={trainer_id[:8]} name={normalised}")
+        self._deliver_task_start_signal()
 
     def _is_command_completed(self, command: str) -> bool:
         if command == "paw":
@@ -224,12 +221,12 @@ class TricksFeature:
 
         return False
 
-    def _deliver_failure(self) -> None:
+    def _deliver_failure(self, trainer_id: str, config: dict, pending: _PendingCommand | None) -> None:
         try:
-            strength = int(self._shock_strength)
-            self.pishock.send_shock(strength=strength, duration=self._shock_duration)
+            strength, duration = self._shock_params(config)
+            self.pishock.send_shock(strength=strength, duration=duration)
             self._log(
-                f"event=shock feature=tricks runtime=pet name={self._pending.name if self._pending else 'unknown'} strength={strength}"
+                f"event=shock feature=tricks runtime=pet trainer={trainer_id[:8]} name={pending.name if pending else 'unknown'} strength={strength}"
             )
         except Exception:
             return
@@ -278,3 +275,33 @@ class TricksFeature:
             logger.log(message)
         except Exception:
             return
+
+    @staticmethod
+    def _scaling_from_config(config: dict) -> dict[str, float]:
+        def _safe(key: str) -> float:
+            try:
+                val = float(config.get(key, 1.0))
+            except Exception:
+                val = 1.0
+            return max(0.0, min(2.0, val))
+
+        return {
+            "delay_scale": _safe("delay_scale"),
+            "cooldown_scale": _safe("cooldown_scale"),
+            "duration_scale": _safe("duration_scale"),
+            "strength_scale": _safe("strength_scale"),
+        }
+
+    def _command_timeout(self, config: dict) -> float:
+        scaling = self._scaling_from_config(config)
+        return max(0.0, self._base_command_timeout * scaling["delay_scale"])
+
+    def _cooldown_seconds(self, config: dict) -> float:
+        scaling = self._scaling_from_config(config)
+        return max(0.0, self._base_cooldown_seconds * scaling["cooldown_scale"])
+
+    def _shock_params(self, config: dict) -> tuple[int, float]:
+        scaling = self._scaling_from_config(config)
+        strength = int(max(0.0, self._base_shock_strength * scaling["strength_scale"]))
+        duration = max(0.0, self._base_shock_duration * scaling["duration_scale"])
+        return strength, duration

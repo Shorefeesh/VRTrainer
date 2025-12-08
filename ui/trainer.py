@@ -1,13 +1,7 @@
 import tkinter as tk
 from tkinter import ttk, simpledialog, messagebox
 
-from .shared import (
-    LabeledCheckbutton,
-    LabeledCombobox,
-    LabeledScale,
-    ScrollableFrame,
-    create_features_frame,
-)
+from .shared import LabeledCheckbutton, LabeledCombobox, LabeledScale, ScrollableFrame
 
 
 class TrainerTab(ScrollableFrame):
@@ -31,6 +25,7 @@ class TrainerTab(ScrollableFrame):
         self.on_profile_deleted = on_profile_deleted
         self._suppress_callbacks = False
         self._detail_frames: list[ttk.Frame] = []
+        self._word_game_options: list[str] = ["None", "Pronouns"]
 
         self._build_input_device_row(input_device_var)
         self._build_profile_section()
@@ -158,24 +153,52 @@ class TrainerTab(ScrollableFrame):
 
     # Feature toggles ----------------------------------------------------
     def _build_features_section(self) -> None:
-        frame, features = create_features_frame(
-            self.container,
-            ["Focus", "Proximity", "Tricks", "Scolding", "Ear/Tail pull", "Pronouns"],
-        )
+        frame = ttk.LabelFrame(self.container, text="Features")
         frame.grid(row=2, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
+        frame.columnconfigure(0, weight=1)
+        frame.columnconfigure(1, weight=1)
         self._detail_frames.append(frame)
 
-        (
+        self.feature_focus = LabeledCheckbutton(frame, "Focus")
+        self.feature_focus.grid(row=0, column=0, sticky="w")
+
+        self.feature_proximity = LabeledCheckbutton(frame, "Proximity")
+        self.feature_proximity.grid(row=1, column=0, sticky="w")
+
+        self.feature_tricks = LabeledCheckbutton(frame, "Tricks")
+        self.feature_tricks.grid(row=2, column=0, sticky="w")
+
+        self.feature_scolding = LabeledCheckbutton(frame, "Scolding words")
+        self.feature_scolding.grid(row=3, column=0, sticky="w")
+
+        self.feature_forbidden_words = LabeledCheckbutton(frame, "Forbidden words")
+        self.feature_forbidden_words.grid(row=4, column=0, sticky="w")
+
+        # Keep word game selection aligned with the combobox.
+        ttk.Label(frame, text="Word game").grid(row=5, column=0, sticky="w", pady=(4, 0))
+        self.word_game_var = tk.StringVar(value=self._word_game_options[0])
+        self.word_game_combo = ttk.Combobox(
+            frame,
+            textvariable=self.word_game_var,
+            state="readonly",
+            values=self._word_game_options,
+        )
+        self.word_game_combo.grid(row=5, column=1, sticky="ew", pady=(4, 0))
+
+        self.feature_ear_tail = LabeledCheckbutton(frame, "Ear/Tail pull")
+        self.feature_ear_tail.grid(row=0, column=1, sticky="w")
+
+        for feature in (
             self.feature_focus,
             self.feature_proximity,
             self.feature_tricks,
             self.feature_scolding,
+            self.feature_forbidden_words,
             self.feature_ear_tail,
-            self.feature_pronouns,
-        ) = features
-
-        for feature in features:
+        ):
             feature.variable.trace_add("write", self._on_any_setting_changed)
+
+        self.word_game_var.trace_add("write", self._on_any_setting_changed)
 
     # Word lists ---------------------------------------------------------
     def _build_word_lists_section(self) -> None:
@@ -183,6 +206,7 @@ class TrainerTab(ScrollableFrame):
         frame.grid(row=3, column=0, columnspan=2, sticky="nsew", padx=12, pady=6)
         frame.columnconfigure(0, weight=1)
         frame.columnconfigure(1, weight=1)
+        frame.columnconfigure(2, weight=1)
         self._detail_frames.append(frame)
 
         # Names ----------------------------------------------------------
@@ -216,6 +240,22 @@ class TrainerTab(ScrollableFrame):
         self.scolding_words_text.grid(row=0, column=0, sticky="nsew")
         scolding_scroll.grid(row=0, column=1, sticky="ns")
         self.scolding_words_text.bind("<FocusOut>", self._on_any_setting_changed)
+
+        # Forbidden words ------------------------------------------------
+        forbidden_label = ttk.Label(frame, text="Forbidden (one per line)")
+        forbidden_label.grid(row=0, column=2, sticky="w")
+
+        forbidden_text_frame = ttk.Frame(frame)
+        forbidden_text_frame.grid(row=1, column=2, sticky="nsew", pady=(2, 6))
+        forbidden_text_frame.columnconfigure(0, weight=1)
+
+        self.forbidden_words_text = tk.Text(forbidden_text_frame, height=6, wrap="word")
+        forbidden_scroll = ttk.Scrollbar(forbidden_text_frame, orient="vertical", command=self.forbidden_words_text.yview)
+        self.forbidden_words_text.configure(yscrollcommand=forbidden_scroll.set)
+
+        self.forbidden_words_text.grid(row=0, column=0, sticky="nsew")
+        forbidden_scroll.grid(row=0, column=1, sticky="ns")
+        self.forbidden_words_text.bind("<FocusOut>", self._on_any_setting_changed)
 
     # Scaling ------------------------------------------------------------
     def _build_scaling_section(self) -> None:
@@ -258,14 +298,18 @@ class TrainerTab(ScrollableFrame):
             "feature_proximity": self.feature_proximity.variable.get(),
             "feature_tricks": self.feature_tricks.variable.get(),
             "feature_scolding": self.feature_scolding.variable.get(),
+            "feature_forbidden_words": self.feature_forbidden_words.variable.get(),
             "feature_ear_tail": self.feature_ear_tail.variable.get(),
-            "feature_pronouns": self.feature_pronouns.variable.get(),
+            "word_game": self.word_game_var.get() or self._word_game_options[0],
+            # Keep compatibility with the existing pronouns feature by deriving it from the word game choice.
+            "feature_pronouns": (self.word_game_var.get() or "").lower() == "pronouns",
             "delay_scale": float(self.delay_scale.variable.get()),
             "cooldown_scale": float(self.cooldown_scale.variable.get()),
             "duration_scale": float(self.duration_scale.variable.get()),
             "strength_scale": float(self.strength_scale.variable.get()),
             "names": self._get_words_from_text(self.names_text),
             "scolding_words": self._get_words_from_text(self.scolding_words_text),
+            "forbidden_words": self._get_words_from_text(self.forbidden_words_text),
         }
 
     def apply_profile_settings(self, settings: dict | None) -> None:
@@ -278,14 +322,16 @@ class TrainerTab(ScrollableFrame):
                 self.feature_proximity.variable.set(False)
                 self.feature_tricks.variable.set(False)
                 self.feature_scolding.variable.set(False)
+                self.feature_forbidden_words.variable.set(False)
                 self.feature_ear_tail.variable.set(False)
-                self.feature_pronouns.variable.set(False)
+                self.word_game_var.set(self._word_game_options[0])
                 self.delay_scale.variable.set(1.0)
                 self.cooldown_scale.variable.set(1.0)
                 self.duration_scale.variable.set(1.0)
                 self.strength_scale.variable.set(1.0)
                 self._set_words_text(self.names_text, [])
                 self._set_words_text(self.scolding_words_text, [])
+                self._set_words_text(self.forbidden_words_text, [])
             else:
                 # Profile name may come from config; keep UI combobox in sync.
                 profile_name = settings.get("profile")
@@ -296,8 +342,16 @@ class TrainerTab(ScrollableFrame):
                 self.feature_proximity.variable.set(bool(settings.get("feature_proximity")))
                 self.feature_tricks.variable.set(bool(settings.get("feature_tricks")))
                 self.feature_scolding.variable.set(bool(settings.get("feature_scolding")))
+                self.feature_forbidden_words.variable.set(bool(settings.get("feature_forbidden_words")))
                 self.feature_ear_tail.variable.set(bool(settings.get("feature_ear_tail")))
-                self.feature_pronouns.variable.set(bool(settings.get("feature_pronouns")))
+
+                word_game = settings.get("word_game") or (
+                    self._word_game_options[1] if settings.get("feature_pronouns") else self._word_game_options[0]
+                )
+                if word_game not in self._word_game_options:
+                    self._word_game_options.append(word_game)
+                    self.word_game_combo["values"] = self._word_game_options
+                self.word_game_var.set(word_game)
 
                 delay_scale = settings.get("delay_scale")
                 cooldown_scale = settings.get("cooldown_scale")
@@ -310,6 +364,7 @@ class TrainerTab(ScrollableFrame):
                 self.strength_scale.variable.set(float(strength_scale if strength_scale is not None else 1.0))
                 self._set_words_text(self.names_text, settings.get("names", []))
                 self._set_words_text(self.scolding_words_text, settings.get("scolding_words", []))
+                self._set_words_text(self.forbidden_words_text, settings.get("forbidden_words", []))
         finally:
             self._suppress_callbacks = False
 

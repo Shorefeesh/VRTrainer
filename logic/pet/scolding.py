@@ -2,7 +2,8 @@ from __future__ import annotations
 
 import threading
 import time
-from typing import Iterable, List, Optional
+from dataclasses import dataclass, field
+from typing import Dict, Iterable, List
 
 from interfaces.pishock import PiShockInterface
 from interfaces.server import RemoteServerInterface
@@ -10,12 +11,17 @@ from interfaces.vrchatosc import VRChatOSCInterface
 from logic.logging_utils import LogFile
 
 
+@dataclass
+class _TrainerScoldState:
+    cooldown_until: float = 0.0
+
+
 class ScoldingFeature:
     """Pet scolding feature.
 
-    Listens for trainer scolding words forwarded from the trainer via the
-    server and shocks the pet when detected. Runs entirely on the pet
-    client.
+    Listens for scolding commands from each trainer in the session.
+    Config for the trainer (word lists, scaling) is supplied via the
+    server; the pet only applies what it receives over the network.
     """
 
     def __init__(
@@ -23,37 +29,23 @@ class ScoldingFeature:
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
         server: RemoteServerInterface | None = None,
-        *,
-        scolding_words: Optional[Iterable[str]] = None,
-        scaling: Optional[dict[str, float]] = None,
         logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
         self.server = server
-        self._running = False
-        self._enabled = True
         self._logger = logger
+        self._running = False
 
-        self._thread: Optional[threading.Thread] = None
+        self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        self._scolding_phrases: List[str] = self._normalise_phrases(scolding_words or [])
+        self._state_by_trainer: Dict[str, _TrainerScoldState] = {}
+        self._phrases_by_trainer: Dict[str, List[str]] = {}
 
         self._base_cooldown_seconds: float = 3.0
-        self._cooldown_seconds: float = self._base_cooldown_seconds
-        self._cooldown_until: float = 0.0
-
         self._base_shock_strength: float = 30
-        self._shock_strength: float = self._base_shock_strength
         self._base_shock_duration: float = 0.5
-        self._shock_duration: float = self._base_shock_duration
-        self.set_scaling(
-            delay_scale=(scaling or {}).get("delay_scale", 1.0),
-            cooldown_scale=(scaling or {}).get("cooldown_scale", 1.0),
-            duration_scale=(scaling or {}).get("duration_scale", 1.0),
-            strength_scale=(scaling or {}).get("strength_scale", 1.0),
-        )
 
         self._log("event=init feature=scolding runtime=pet")
 
@@ -89,36 +81,77 @@ class ScoldingFeature:
         self._log("event=stop feature=scolding runtime=pet")
 
     # Internal helpers -------------------------------------------------
-    def set_scaling(
-        self,
-        *,
-        delay_scale: float = 1.0,
-        cooldown_scale: float = 1.0,
-        duration_scale: float = 1.0,
-        strength_scale: float = 1.0,
-    ) -> None:
-        self._cooldown_seconds = max(0.0, self._base_cooldown_seconds * cooldown_scale)
-        self._shock_strength = max(0.0, self._base_shock_strength * strength_scale)
-        self._shock_duration = max(0.0, self._base_shock_duration * duration_scale)
-
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():
-            if not self._enabled:
+            active_configs = self._active_trainer_configs()
+            self._prune_inactive_states(active_configs)
+
+            if not active_configs:
                 if self._stop_event.wait(0.5):
                     break
                 continue
 
-            if self._scolding_phrases and self._detect_remote_scold():
-                now = time.time()
-                if now >= self._cooldown_until:
-                    self._deliver_scolding_shock()
-                    self._cooldown_until = now + self._cooldown_seconds
+            events_by_trainer = self._collect_scold_events()
+            now = time.time()
+
+            for trainer_id, config in active_configs.items():
+                state = self._state_by_trainer.setdefault(trainer_id, _TrainerScoldState())
+
+                phrases = self._phrases_by_trainer.setdefault(
+                    trainer_id, self._normalise_phrases(config.get("scolding_words", []))
+                )
+
+                if not phrases:
+                    continue
+
+                if events_by_trainer.get(trainer_id):
+                    if now >= state.cooldown_until and self._matches_any(events_by_trainer[trainer_id], phrases):
+                        self._deliver_scolding_shock(trainer_id, config)
+                        state.cooldown_until = now + self._cooldown_seconds(config)
 
             if self._stop_event.wait(0.5):
                 break
 
-    def set_enabled(self, enabled: bool) -> None:
-        self._enabled = bool(enabled)
+    def _active_trainer_configs(self) -> Dict[str, dict]:
+        server = self.server
+        if server is None:
+            return {}
+        configs = getattr(server, "latest_settings_by_trainer", lambda: {})()
+        return {tid: cfg for tid, cfg in configs.items() if cfg.get("feature_scolding")}
+
+    def _prune_inactive_states(self, active_configs: Dict[str, dict]) -> None:
+        for trainer_id in list(self._state_by_trainer.keys()):
+            if trainer_id not in active_configs:
+                self._state_by_trainer.pop(trainer_id, None)
+                self._phrases_by_trainer.pop(trainer_id, None)
+
+    def _collect_scold_events(self) -> Dict[str, List[dict]]:
+        if self.server is None:
+            return {}
+
+        events = self.server.poll_events(
+            limit=10,
+            predicate=lambda evt: (
+                isinstance(evt, dict)
+                and isinstance(evt.get("payload"), dict)
+                and evt.get("payload", {}).get("type") == "command"
+                and evt.get("payload", {}).get("meta", {}).get("feature") == "scolding"
+            ),
+        )
+
+        grouped: Dict[str, List[dict]] = {}
+        for event in events:
+            trainer_id = str(event.get("from_client") or "")
+            if trainer_id:
+                grouped.setdefault(trainer_id, []).append(event)
+        return grouped
+
+    def _matches_any(self, events: List[dict], phrases: List[str]) -> bool:
+        for event in events:
+            text = event.get("payload", {}).get("phrase", "")
+            if self._contains_scolding(text, phrases):
+                return True
+        return False
 
     def _normalise_phrases(self, words: Iterable[str]) -> List[str]:
         return [self._normalise(word) for word in words if word and self._normalise(word)]
@@ -140,24 +173,7 @@ class ScoldingFeature:
         cleaned = "".join(chars)
         return " ".join(cleaned.split())
 
-    def _detect_remote_scold(self) -> bool:
-        if self.server is None:
-            return False
-
-        events = self.server.poll_events(
-            limit=5,
-            predicate=lambda evt: (
-                isinstance(evt, dict)
-                and isinstance(evt.get("payload"), dict)
-                and evt.get("payload", {}).get("type") == "command"
-                and evt.get("payload", {}).get("meta", {}).get("feature") == "scolding"
-                and self._contains_scolding(evt.get("payload", {}).get("phrase", ""))
-            ),
-        )
-
-        return bool(events)
-
-    def _contains_scolding(self, text: str) -> bool:
+    def _contains_scolding(self, text: str, phrases: List[str]) -> bool:
         if not text:
             return False
 
@@ -165,16 +181,16 @@ class ScoldingFeature:
         if not normalised:
             return False
 
-        for phrase in self._scolding_phrases:
+        for phrase in phrases:
             if phrase and phrase in normalised:
                 return True
         return False
 
-    def _deliver_scolding_shock(self) -> None:
+    def _deliver_scolding_shock(self, trainer_id: str, config: dict) -> None:
         try:
-            strength = int(self._shock_strength)
-            self.pishock.send_shock(strength=strength, duration=self._shock_duration)
-            self._log(f"event=shock feature=scolding runtime=pet strength={strength}")
+            strength, duration = self._shock_params(config)
+            self.pishock.send_shock(strength=strength, duration=duration)
+            self._log(f"event=shock feature=scolding runtime=pet trainer={trainer_id[:8]} strength={strength}")
         except Exception:
             return
 
@@ -187,3 +203,29 @@ class ScoldingFeature:
             logger.log(message)
         except Exception:
             return
+
+    def _shock_params(self, config: dict) -> tuple[int, float]:
+        scaling = self._scaling_from_config(config)
+        strength = int(max(0.0, self._base_shock_strength * scaling["strength_scale"]))
+        duration = max(0.0, self._base_shock_duration * scaling["duration_scale"])
+        return strength, duration
+
+    def _cooldown_seconds(self, config: dict) -> float:
+        scaling = self._scaling_from_config(config)
+        return max(0.0, self._base_cooldown_seconds * scaling["cooldown_scale"])
+
+    @staticmethod
+    def _scaling_from_config(config: dict) -> dict[str, float]:
+        def _safe(key: str) -> float:
+            try:
+                val = float(config.get(key, 1.0))
+            except Exception:
+                val = 1.0
+            return max(0.0, min(2.0, val))
+
+        return {
+            "delay_scale": _safe("delay_scale"),
+            "cooldown_scale": _safe("cooldown_scale"),
+            "duration_scale": _safe("duration_scale"),
+            "strength_scale": _safe("strength_scale"),
+        }

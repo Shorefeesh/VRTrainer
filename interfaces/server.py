@@ -338,6 +338,17 @@ class RemoteServerInterface:
     def latest_settings(self) -> dict[str, Any]:
         return dict(self._latest_settings)
 
+    @property
+    def latest_settings_by_trainer(self) -> dict[str, dict[str, Any]]:
+        """Return the last config payload seen from every trainer in the session."""
+
+        return dict(self._latest_settings_by_trainer)
+
+    def trainer_client_ids(self) -> list[str]:
+        """Public wrapper for the current trainer ids in the session roster."""
+
+        return self._trainer_client_ids()
+
     def get_trainer_settings(self, trainer_client_id: str | None) -> dict[str, Any]:
         """Return the last config payload sent by the given trainer, if any."""
 

@@ -3,9 +3,27 @@ from tkinter import ttk
 
 from .shared import (
     LabeledCombobox,
+    LabeledEntry,
     ScrollableFrame,
-    create_pishock_credentials_frame,
 )
+
+
+def _create_pishock_credentials_frame(
+    master,
+    *,
+    frame_text: str = "PiShock credentials",
+) -> tuple[ttk.LabelFrame, LabeledEntry, LabeledEntry]:
+    """Create a PiShock credential section shared by Trainer/Pet tabs."""
+    frame = ttk.LabelFrame(master, text=frame_text)
+    frame.columnconfigure(0, weight=1)
+
+    username = LabeledEntry(frame, "Username")
+    username.grid(row=0, column=0, sticky="ew", pady=(0, 4))
+
+    api_key = LabeledEntry(frame, "API key", show="*")
+    api_key.grid(row=1, column=0, sticky="ew")
+
+    return frame, username, api_key
 
 class PetTab(ScrollableFrame):
     """Pet tab UI."""
@@ -15,12 +33,6 @@ class PetTab(ScrollableFrame):
 
         self.on_settings_change = on_settings_change
         self._suppress_callbacks = False
-        self._feature_focus_enabled = False
-        self._feature_proximity_enabled = False
-        self._feature_tricks_enabled = False
-        self._feature_scolding_enabled = False
-        self._feature_ear_tail_enabled = False
-        self._feature_pronouns_enabled = False
 
         self._build_input_device_row(input_device_var)
         self._build_pishock_section()
@@ -32,7 +44,7 @@ class PetTab(ScrollableFrame):
         self.input_device_row.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
 
     def _build_pishock_section(self) -> None:
-        frame, self.pishock_username, self.pishock_api_key = create_pishock_credentials_frame(self.container)
+        frame, self.pishock_username, self.pishock_api_key = _create_pishock_credentials_frame(self.container)
         frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(6, 12))
 
         self.pishock_username.variable.trace_add("write", self._on_any_setting_changed)
@@ -67,24 +79,6 @@ class PetTab(ScrollableFrame):
                 self.pishock_api_key.variable.set(settings.get("pishock_api_key", ""))
         finally:
             self._suppress_callbacks = False
-
-    def set_feature_flags(
-        self,
-        *,
-        feature_focus: bool = False,
-        feature_proximity: bool = False,
-        feature_tricks: bool = False,
-        feature_scolding: bool = False,
-        feature_ear_tail: bool = False,
-        feature_pronouns: bool = False,
-    ) -> None:
-        """Receive feature toggles controlled from the trainer side."""
-        self._feature_focus_enabled = bool(feature_focus)
-        self._feature_proximity_enabled = bool(feature_proximity)
-        self._feature_tricks_enabled = bool(feature_tricks)
-        self._feature_scolding_enabled = bool(feature_scolding)
-        self._feature_ear_tail_enabled = bool(feature_ear_tail)
-        self._feature_pronouns_enabled = bool(feature_pronouns)
 
     # Internal callbacks -------------------------------------------------
     def _on_any_setting_changed(self, *_) -> None:

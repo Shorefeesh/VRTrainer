@@ -4,7 +4,7 @@ import threading
 
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.whisper import WhisperInterface
+from interfaces.server import RemoteServerInterface
 from logic.logging_utils import LogFile
 
 
@@ -19,15 +19,14 @@ class PullFeature:
         self,
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
-        whisper: WhisperInterface,
+        server: RemoteServerInterface | None = None,
         logger: LogFile | None = None,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
-        self.whisper = whisper
-        self._running = False
-        self._enabled = True
+        self.server = server
         self._logger = logger
+        self._running = False
 
         # Background worker that polls OSC parameters.
         self._thread: threading.Thread | None = None
@@ -85,7 +84,7 @@ class PullFeature:
         import time
 
         while not self._stop_event.is_set():
-            if not self._enabled:
+            if not self._has_active_trainer():
                 if self._stop_event.wait(self._poll_interval):
                     break
                 continue
@@ -101,10 +100,13 @@ class PullFeature:
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def set_enabled(self, enabled: bool) -> None:
-        """Enable or disable ear/tail pull monitoring."""
+    def _has_active_trainer(self) -> bool:
+        server = self.server
+        if server is None:
+            return False
 
-        self._enabled = bool(enabled)
+        configs = getattr(server, "latest_settings_by_trainer", lambda: {})()
+        return any(cfg.get("feature_ear_tail") for cfg in configs.values())
 
     def _check_and_maybe_shock(self, now: float) -> bool:
         """Return True if a shock was sent based on current parameters."""

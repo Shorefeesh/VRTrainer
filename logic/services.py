@@ -12,7 +12,7 @@ from interfaces.whisper import WhisperInterface
 from interfaces.server import RemoteServerInterface
 from logic.logging_utils import SessionLogManager
 from logic.pet.focus import FocusFeature
-from logic.pet.pronouns import PronounsFeature
+from logic.pet.wordgame import WordFeature
 from logic.pet.proximity import ProximityFeature
 from logic.pet.pull import PullFeature
 from logic.pet.scolding import ScoldingFeature
@@ -468,56 +468,36 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
     pishock.start()
     whisper.start()
 
-    scaling = _extract_scaling(pet_settings)
     server = _ensure_server(role="pet")
 
     features: List[Any] = [
-        PullFeature(osc=osc, pishock=pishock, whisper=whisper, logger=logs.get_logger("pull_feature.log")),
-        PronounsFeature(osc=osc, pishock=pishock, whisper=whisper, logger=logs.get_logger("pronouns_feature.log")),
+        PullFeature(osc=osc, pishock=pishock, whisper=whisper, server=server, logger=logs.get_logger("pull_feature.log")),
+        WordFeature(osc=osc, pishock=pishock, whisper=whisper, server=server, logger=logs.get_logger("pronouns_feature.log")),
         FocusFeature(
             osc=osc,
             pishock=pishock,
             server=server,
-            scaling=scaling,
             logger=logs.get_logger("focus_feature.log"),
         ),
         ProximityFeature(
             osc=osc,
             pishock=pishock,
             server=server,
-            scaling=scaling,
             logger=logs.get_logger("proximity_feature.log"),
         ),
         TricksFeature(
             osc=osc,
             pishock=pishock,
             server=server,
-            names=pet_settings.get("names") or [],
-            scaling=scaling,
             logger=logs.get_logger("tricks_feature.log"),
         ),
         ScoldingFeature(
             osc=osc,
             pishock=pishock,
             server=server,
-            scolding_words=pet_settings.get("scolding_words") or [],
-            scaling=scaling,
             logger=logs.get_logger("scolding_feature.log"),
         ),
     ]
-
-    _apply_feature_flags(
-        features,
-        {
-            FocusFeature: bool(pet_settings.get("feature_focus")),
-            ProximityFeature: bool(pet_settings.get("feature_proximity")),
-            TricksFeature: bool(pet_settings.get("feature_tricks")),
-            ScoldingFeature: bool(pet_settings.get("feature_scolding")),
-            PullFeature: bool(pet_settings.get("feature_ear_tail")),
-            PronounsFeature: bool(pet_settings.get("feature_pronouns")),
-        },
-    )
-    _apply_feature_scaling(features, scaling)
 
     for feature in features:
         if hasattr(feature, "start"):
@@ -592,25 +572,10 @@ def start_pet(pet_settings: dict, input_device: Optional[str]) -> None:
 
 def update_pet_feature_states(pet_settings: dict) -> None:
     """Update pet feature enablement without restarting services."""
-
-    runtime = _pet_runtime
-    if runtime is None:
-        return
-
-    scaling = _extract_scaling(pet_settings)
-    _apply_feature_scaling(runtime.features, scaling)
-
-    _apply_feature_flags(
-        runtime.features,
-        {
-            FocusFeature: bool(pet_settings.get("feature_focus")),
-            ProximityFeature: bool(pet_settings.get("feature_proximity")),
-            TricksFeature: bool(pet_settings.get("feature_tricks")),
-            ScoldingFeature: bool(pet_settings.get("feature_scolding")),
-            PullFeature: bool(pet_settings.get("feature_ear_tail")),
-            PronounsFeature: bool(pet_settings.get("feature_pronouns")),
-        },
-    )
+    # Pet runtime feature states are now driven exclusively by the
+    # trainer configs delivered via the server. This method remains as a
+    # no-op to preserve API compatibility with the UI layer.
+    return None
 
 
 def stop_pet() -> None:

@@ -10,8 +10,10 @@ TRAINER_SETTINGS_KEYS = [
     "feature_proximity",
     "feature_tricks",
     "feature_scolding",
+    "feature_forbidden_words",
     "feature_ear_tail",
     "feature_pronouns",
+    "word_game",
     "delay_scale",
     "cooldown_scale",
     "duration_scale",
@@ -19,6 +21,7 @@ TRAINER_SETTINGS_KEYS = [
     "names",
     "command_words",
     "scolding_words",
+    "forbidden_words",
 ]
 
 
@@ -56,8 +59,10 @@ def default_profile_settings(profile_name: str) -> Dict[str, Any]:
         "feature_proximity": False,
         "feature_tricks": False,
         "feature_scolding": False,
+        "feature_forbidden_words": False,
         "feature_ear_tail": False,
         "feature_pronouns": False,
+        "word_game": "None",
         "delay_scale": 1.0,
         "cooldown_scale": 1.0,
         "duration_scale": 1.0,
@@ -65,6 +70,7 @@ def default_profile_settings(profile_name: str) -> Dict[str, Any]:
         "names": [],
         "command_words": [],
         "scolding_words": [],
+        "forbidden_words": [],
     }
 
 

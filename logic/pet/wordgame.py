@@ -7,11 +7,12 @@ from typing import Optional, Set
 from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
+from interfaces.server import RemoteServerInterface
 from logic.logging_utils import LogFile
 
 
-class PronounsFeature:
-    """Pet pronouns feature.
+class WordFeature:
+    """Pet word feature.
 
     Listens to first-person speech from the pet via Whisper and uses
     PiShock to reinforce preferred pronoun usage.
@@ -22,6 +23,7 @@ class PronounsFeature:
         osc: VRChatOSCInterface,
         pishock: PiShockInterface,
         whisper: WhisperInterface,
+        server: RemoteServerInterface | None = None,
         logger: LogFile | None = None,
     ) -> None:
         # Interfaces are provided for future expansion; OSC is not
@@ -30,9 +32,9 @@ class PronounsFeature:
         self.osc = osc
         self.pishock = pishock
         self.whisper = whisper
-        self._running = False
-        self._enabled = True
+        self.server = server
         self._logger = logger
+        self._running = False
 
         # Background worker thread that consumes Whisper transcripts.
         self._thread: Optional[threading.Thread] = None
@@ -84,7 +86,7 @@ class PronounsFeature:
 
         thread = threading.Thread(
             target=self._worker_loop,
-            name="PetPronounsFeature",
+            name="PetWordFeature",
             daemon=True,
         )
         self._thread = thread
@@ -110,7 +112,7 @@ class PronounsFeature:
     def _worker_loop(self) -> None:
         """Background loop that watches Whisper transcripts."""
         while not self._stop_event.is_set():
-            if not self._enabled:
+            if not self._has_active_trainer():
                 if self._stop_event.wait(0.5):
                     break
                 continue
@@ -132,10 +134,13 @@ class PronounsFeature:
             if self._stop_event.wait(0.5):
                 break
 
-    def set_enabled(self, enabled: bool) -> None:
-        """Enable or disable pronoun monitoring."""
+    def _has_active_trainer(self) -> bool:
+        server = self.server
+        if server is None:
+            return False
 
-        self._enabled = bool(enabled)
+        configs = getattr(server, "latest_settings_by_trainer", lambda: {})()
+        return any(cfg.get("feature_pronouns") for cfg in configs.values())
 
     def _contains_disallowed_pronouns(self, text: str) -> bool:
         """Return True if the text includes first-person pronouns."""
