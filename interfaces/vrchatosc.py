@@ -60,7 +60,6 @@ class VRChatOSCInterface:
         }
         self._param_values: dict[str, object] = {}
 
-        self._log_all_events = log_all_events
         self._log_relevant_events = log_relevant_events
 
         self._tx_client = None
@@ -89,6 +88,7 @@ class VRChatOSCInterface:
         import threading
 
         dispatcher = Dispatcher()
+        dispatcher.map("/*", self._on_osc_message)
         dispatcher.set_default_handler(self._on_osc_message)
 
         try:
@@ -104,8 +104,7 @@ class VRChatOSCInterface:
         self._thread = thread
         thread.start()
 
-        self._log_message(self._log_all_events, f"OSC listener started on {self._host}:{self._port}")
-        self._log_message(self._log_relevant_events, "OSC listener started")
+        self._log_message(self._log_relevant_events, "OSC listener started on {self._host}:{self._port}")
 
     def stop(self) -> None:
         """Stop OSC handling."""
@@ -322,8 +321,6 @@ class VRChatOSCInterface:
             return
 
     def _log_osc_message(self, address: str, values: Iterable[object], is_relevant: bool) -> None:
-        line = self._format_osc_line(address, values)
-        self._log_message(self._log_all_events, line)
-
         if is_relevant:
+            line = self._format_osc_line(address, values)
             self._log_message(self._log_relevant_events, line)
