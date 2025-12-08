@@ -97,15 +97,8 @@ class ScoldingFeature:
             for trainer_id, config in active_configs.items():
                 state = self._state_by_trainer.setdefault(trainer_id, _TrainerScoldState())
 
-                phrases = self._phrases_by_trainer.setdefault(
-                    trainer_id, self._normalise_phrases(config.get("scolding_words", []))
-                )
-
-                if not phrases:
-                    continue
-
                 if events_by_trainer.get(trainer_id):
-                    if now >= state.cooldown_until and self._matches_any(events_by_trainer[trainer_id], phrases):
+                    if now >= state.cooldown_until:
                         self._deliver_scolding_shock(trainer_id, config)
                         state.cooldown_until = now + self._cooldown_seconds(config)
 
@@ -140,46 +133,6 @@ class ScoldingFeature:
             if trainer_id:
                 grouped.setdefault(trainer_id, []).append(event)
         return grouped
-
-    def _matches_any(self, events: List[dict], phrases: List[str]) -> bool:
-        for event in events:
-            text = event.get("payload", {}).get("phrase", "")
-            if self._contains_scolding(text, phrases):
-                return True
-        return False
-
-    def _normalise_phrases(self, words: Iterable[str]) -> List[str]:
-        return [self._normalise(word) for word in words if word and self._normalise(word)]
-
-    @staticmethod
-    def _normalise(text: str) -> str:
-        if not text:
-            return ""
-
-        chars: List[str] = []
-        for ch in text.lower():
-            if ch.isalnum():
-                chars.append(ch)
-            elif ch.isspace():
-                chars.append(" ")
-            else:
-                chars.append(" ")
-
-        cleaned = "".join(chars)
-        return " ".join(cleaned.split())
-
-    def _contains_scolding(self, text: str, phrases: List[str]) -> bool:
-        if not text:
-            return False
-
-        normalised = self._normalise(text)
-        if not normalised:
-            return False
-
-        for phrase in phrases:
-            if phrase and phrase in normalised:
-                return True
-        return False
 
     def _deliver_scolding_shock(self, trainer_id: str, config: dict) -> None:
         try:
