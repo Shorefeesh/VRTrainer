@@ -6,10 +6,12 @@ from interfaces.audio_devices import list_input_devices
 from logic import services
 from logic.trainer import profile as trainer_profile
 
+from .logs import EventLogPanel, WhisperLogPanel
 from .trainer import TrainerTab
 from .pet import PetTab
 from .stats import StatsTab
 from .server import ServerTab
+from .status import ConnectionStatusPanel, format_osc_status, format_pishock_status
 
 
 def create_root() -> tk.Tk:
@@ -28,7 +30,15 @@ def build_ui(root: tk.Tk) -> None:
     # Load configuration once at startup.
     config = load_config()
 
-    notebook = ttk.Notebook(root)
+    main_frame = ttk.Frame(root)
+    main_frame.pack(fill="both", expand=True)
+    main_frame.rowconfigure(0, weight=6)
+    main_frame.rowconfigure(1, weight=0)
+    main_frame.rowconfigure(2, weight=2)
+    main_frame.rowconfigure(3, weight=3)
+    main_frame.columnconfigure(0, weight=1)
+
+    notebook = ttk.Notebook(main_frame)
     input_device_var = tk.StringVar(root)
 
     def _on_input_device_changed(*_) -> None:
@@ -217,38 +227,6 @@ def build_ui(root: tk.Tk) -> None:
         services.stop_trainer()
         services.stop_pet()
 
-    def _format_osc_status(role: str, snapshot: dict | None) -> str:
-        if snapshot is None:
-            return "No data"
-
-        messages = snapshot.get("messages_last_10s", 0)
-        if role == "trainer":
-            expected = snapshot.get("expected_trainer_params_total", 0) or 0
-            found = snapshot.get("found_trainer_params", 0) or 0
-        else:
-            expected = snapshot.get("expected_pet_pull_params_total") or snapshot.get("expected_trainer_params_total") or 0
-            found = snapshot.get("found_pet_pull_params") or snapshot.get("found_trainer_params") or 0
-
-        missing = max(expected - found, 0)
-        if messages == 0:
-            return "No OSC"
-        if expected and missing > 0:
-            return f"{found}/{expected} params"
-        return f"{messages} msgs/10s"
-
-    def _format_pishock_status(status: dict | None, running: bool) -> str:
-        if not running:
-            return "Stopped"
-        if status is None:
-            return "No data"
-        if not status.get("enabled", True):
-            return "Not used"
-        if status.get("connected"):
-            return "Connected"
-        if status.get("has_credentials"):
-            return "Not connected"
-        return "Not configured"
-
     def runtime_status_provider(role: str | None) -> dict[str, str]:
         role = role or ""
         if role == "trainer":
@@ -264,9 +242,12 @@ def build_ui(root: tk.Tk) -> None:
         else:
             return {}
 
+        osc_text = format_osc_status(role, osc_status) if running else "Stopped"
+
         status = {
-            "osc": _format_osc_status(role, osc_status) if running else "Stopped",
-            "pishock": _format_pishock_status(pishock_status, running),
+            "osc": osc_text,
+            "osc_details": osc_text,
+            "pishock": format_pishock_status(pishock_status, running),
             "whisper": whisper_status,
         }
         username = services.get_server_username()
@@ -315,10 +296,19 @@ def build_ui(root: tk.Tk) -> None:
 
     notebook.add(trainer_tab, text="trainer")
     notebook.add(pet_tab, text="pet")
-    notebook.add(server_tab, text="server")
+    notebook.add(server_tab, text="session")
     notebook.add(stats_tab, text="stats")
 
-    notebook.pack(fill="both", expand=True)
+    notebook.grid(row=0, column=0, sticky="nsew")
+
+    connection_status = ConnectionStatusPanel(main_frame)
+    connection_status.grid(row=1, column=0, sticky="ew", padx=10, pady=(6, 4))
+
+    event_log = EventLogPanel(main_frame)
+    event_log.grid(row=2, column=0, sticky="nsew", padx=10, pady=(0, 4))
+
+    whisper_log = WhisperLogPanel(main_frame)
+    whisper_log.grid(row=3, column=0, sticky="nsew", padx=10, pady=(0, 10))
 
 
 def main() -> None:

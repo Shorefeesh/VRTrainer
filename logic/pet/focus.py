@@ -56,6 +56,7 @@ class FocusFeature:
 
         self._last_tick: float | None = None
         self._last_sample_log: float = 0.0
+        self._last_command_trainer: str | None = None
 
         self._name_penalty: float = 0.15
 
@@ -167,7 +168,8 @@ class FocusFeature:
         if not events:
             return
 
-        for _ in events:
+        for event in events:
+            self._last_command_trainer = str(event.get("from_client") or "") or self._last_command_trainer
             self._focus_meter = max(0.0, self._focus_meter - self._name_penalty)
 
     def _should_shock(self, now: float) -> bool:
@@ -187,11 +189,12 @@ class FocusFeature:
                 {
                     "event": "shock",
                     "runtime": "pet",
-                    "feature": "focus",
-                    "meter": self._focus_meter,
-                    "threshold": self._shock_threshold,
-                    "strength": strength,
-                }
+                "feature": "focus",
+                "meter": self._focus_meter,
+                "threshold": self._shock_threshold,
+                "strength": strength,
+            },
+            target_client=self._last_command_trainer,
             )
         except Exception:
             return
@@ -221,8 +224,9 @@ class FocusFeature:
                 "feature": "focus",
                 "meter": self._focus_meter,
                 "threshold": self._shock_threshold,
-            }
-        )
+            },
+            broadcast_trainers=True,
+            )
 
     @staticmethod
     def _normalise(text: str) -> str:
@@ -240,12 +244,12 @@ class FocusFeature:
 
         return " ".join("".join(chars).split())
 
-    def _send_stats(self, stats: dict[str, object]) -> None:
+    def _send_stats(self, stats: dict[str, object], *, target_client: str | None = None, broadcast_trainers: bool | None = None) -> None:
         server = self.server
         if server is None:
             return
 
         try:
-            server.send_logs(stats)
+            server.send_logs(stats, target_clients=[target_client] if target_client else None, broadcast_trainers=broadcast_trainers)
         except Exception:
             return

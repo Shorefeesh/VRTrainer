@@ -56,7 +56,9 @@ class ProximityFeature:
         self._command_timeout: float = self._base_command_timeout
         self._command_target: float = 1
         self._pending_command_deadline: float | None = None
+        self._pending_command_from: str | None = None
         self._last_sample_log: float = 0.0
+        self._last_command_trainer: str | None = None
         self.set_scaling(
             delay_scale=(scaling or {}).get("delay_scale", 1.0),
             cooldown_scale=(scaling or {}).get("cooldown_scale", 1.0),
@@ -128,23 +130,48 @@ class ProximityFeature:
                     break
                 continue
 
-            if self._detect_remote_summon():
+            summon_from = self._detect_remote_summon()
+            if summon_from:
+                self._pending_command_from = summon_from
                 self._pending_command_deadline = now + self._command_timeout
                 self._log("event=command_start feature=proximity runtime=pet name=summon")
+                self._send_stats(
+                    {
+                        "event": "command_start",
+                        "runtime": "pet",
+                        "feature": "proximity",
+                        "name": "summon",
+                    },
+                    target_client=summon_from,
+                )
 
             if self._pending_command_deadline is not None:
                 if self._meets_command_target(proximity_value):
                     self._pending_command_deadline = None
+                    trainer_target = self._pending_command_from
+                    self._pending_command_from = None
                     self._log(
                         f"event=command_success feature=proximity runtime=pet name=summon proximity={proximity_value:.3f}"
                     )
+                    self._send_stats(
+                        {
+                            "event": "command_success",
+                            "runtime": "pet",
+                            "feature": "proximity",
+                            "name": "summon",
+                            "proximity": proximity_value,
+                        },
+                        target_client=trainer_target,
+                    )
                 elif now >= self._pending_command_deadline and now >= self._cooldown_until:
-                    self._deliver_correction("summon command missed", proximity_value)
+                    trainer_target = self._pending_command_from
+                    self._pending_command_from = None
+                    self._deliver_correction("summon command missed", proximity_value, target_client=trainer_target)
                     self._cooldown_until = now + self._cooldown_seconds
                     self._pending_command_deadline = None
 
             if now >= self._cooldown_until and self._is_too_far(now, proximity_value):
-                self._deliver_correction("too far from trainer", proximity_value)
+                self._deliver_correction("too far from trainer", proximity_value, broadcast_trainers=True)
                 self._cooldown_until = now + self._cooldown_seconds
                 self._breach_started_at = None
 
@@ -171,7 +198,7 @@ class ProximityFeature:
 
         return (now - self._breach_started_at) >= self._breach_duration
 
-    def _deliver_correction(self, reason: str, proximity_value: float | None = None) -> None:
+    def _deliver_correction(self, reason: str, proximity_value: float | None = None, *, target_client: str | None = None, broadcast_trainers: bool | None = None) -> None:
         try:
             proximity = (
                 proximity_value if proximity_value is not None else self.osc.get_float_param("Trainer/Proximity", default=0.0)
@@ -186,19 +213,21 @@ class ProximityFeature:
                 {
                     "event": "shock",
                     "runtime": "pet",
-                    "feature": "proximity",
-                    "reason": reason,
-                    "proximity": proximity,
-                    "threshold": self._proximity_threshold,
-                    "strength": strength,
-                }
+                "feature": "proximity",
+                "reason": reason,
+                "proximity": proximity,
+                "threshold": self._proximity_threshold,
+                "strength": strength,
+            },
+            target_client=target_client,
+            broadcast_trainers=broadcast_trainers,
             )
         except Exception:
             return
 
-    def _detect_remote_summon(self) -> bool:
+    def _detect_remote_summon(self) -> str | None:
         if self.server is None:
-            return False
+            return None
 
         events = self.server.poll_events(
             limit=5,
@@ -210,7 +239,14 @@ class ProximityFeature:
             ),
         )
 
-        return bool(events)
+        if not events:
+            return None
+
+        trainer = None
+        for evt in events:
+            trainer = str(evt.get("from_client") or trainer or "")
+        self._last_command_trainer = trainer or self._last_command_trainer
+        return trainer
 
     def _meets_command_target(self, proximity_value: float | None = None) -> bool:
         proximity = (
@@ -243,15 +279,16 @@ class ProximityFeature:
                 "feature": "proximity",
                 "value": proximity_value,
                 "threshold": self._proximity_threshold,
-            }
+            },
+            broadcast_trainers=True,
         )
 
-    def _send_stats(self, stats: dict[str, object]) -> None:
+    def _send_stats(self, stats: dict[str, object], *, target_client: str | None = None, broadcast_trainers: bool | None = None) -> None:
         server = self.server
         if server is None:
             return
 
         try:
-            server.send_logs(stats)
+            server.send_logs(stats, target_clients=[target_client] if target_client else None, broadcast_trainers=broadcast_trainers)
         except Exception:
             return

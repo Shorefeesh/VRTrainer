@@ -38,7 +38,7 @@ class VRChatOSCInterface:
         self._trainer_params_seen: set[str] = set()
         self._expected_trainer_params:  set[str] = {
         }
-        self._expected_pet_pull_params: set[str] = {
+        self._expected_pet_params: set[str] = {
             "Trainer/Proximity",
             "Trainer/Focus",
             "Trainer/Paw",
@@ -227,7 +227,7 @@ class VRChatOSCInterface:
             # Pet ear/tail pull parameters are tracked via the generic
             # parameter store; treat known pull params as "expected" and
             # mark whichever have been observed so far as "found".
-            expected_pet = set(self._expected_pet_pull_params)
+            expected_pet = set(self._expected_pet_params)
             seen_pet = {name for name in self._param_values.keys() if name in expected_pet}
 
         found_trainer = len(expected_trainer & seen_trainer)
@@ -242,9 +242,9 @@ class VRChatOSCInterface:
             "expected_trainer_params_total": len(expected_trainer),
             "found_trainer_params": found_trainer,
             "missing_trainer_params": missing_trainer,
-            "expected_pet_pull_params_total": len(expected_pet),
-            "found_pet_pull_params": found_pet,
-            "missing_pet_pull_params": missing_pet,
+            "expected_pet_params_total": len(expected_pet),
+            "found_pet_params": found_pet,
+            "missing_pet_params": missing_pet,
         }
 
     @property
@@ -301,7 +301,7 @@ class VRChatOSCInterface:
         return max(0.0, min(1.0, value))
 
     def _is_relevant_param(self, param_name: str) -> bool:
-        return param_name in self._expected_trainer_params or param_name in self._expected_pet_pull_params
+        return param_name in self._expected_trainer_params or param_name in self._expected_pet_params
 
     def _format_osc_line(self, address: str, values: Iterable[object]) -> str:
         if not values:

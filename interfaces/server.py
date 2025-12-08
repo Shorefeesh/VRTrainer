@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, MutableMapping, Optional, List
+from typing import Any, Callable, MutableMapping, Optional, List, Iterable
 import time
 from collections import deque
 import uuid
@@ -53,6 +53,7 @@ class RemoteServerInterface:
         self._session_id: str | None = None
         self._session_state: str = "idle"
         self._latest_settings: dict[str, Any] = {}
+        self._latest_settings_by_trainer: dict[str, dict[str, Any]] = {}
         self._session_users: list[dict[str, Any]] = []
         self._events: list[str] = []
         self._last_event_id: str | None = None
@@ -96,17 +97,11 @@ class RemoteServerInterface:
         self._session_users = []
         self._events = []
         self._last_event_id = None
+        self._latest_settings_by_trainer = {}
         self._seen_event_ids.clear()
         self._seen_event_ids_set.clear()
         self._stats_by_user = {}
-        self._ws_stop.set()
-        if self._ws:
-            try:
-                self._ws.close()
-            except Exception:
-                pass
-        self._ws = None
-        self._ws_thread = None
+        self._close_ws()
 
     def record_local_event(self, message: str) -> None:
         """Append a log line to the session event list without server IO."""
@@ -158,18 +153,60 @@ class RemoteServerInterface:
             }
         )
 
-    def send_logs(self, stats: MutableMapping[str, Any]) -> None:
-        """Pet-emitted metrics/telemetry."""
-        self._send_ws(
-            {
-                "type": "logs",
-                "from_client": str(self._client_uuid),
-                "target_scope": "per_client" if stats.get("target_client") else "broadcast",
-                "target_client": stats.get("target_client"),
-                "payload": dict(stats),
-                "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
-            }
-        )
+    def send_logs(
+        self,
+        stats: MutableMapping[str, Any],
+        *,
+        target_clients: Iterable[str] | None = None,
+        broadcast_trainers: bool | None = None,
+    ) -> None:
+        """Pet-emitted metrics/telemetry.
+
+        Logs must target specific trainers; when multiple trainers are present we
+        fan out per-client messages to avoid server validation errors.
+        """
+
+        # Keep roster reasonably fresh when we need to route logs.
+        try:
+            self._refresh_session_users()
+        except Exception:
+            pass
+
+        broadcast_flag = bool(stats.pop("broadcast_trainers", False))
+        if broadcast_trainers is not None:
+            broadcast_flag = bool(broadcast_trainers)
+
+        explicit_targets = list(target_clients or [])
+        target_client_field = stats.get("target_client")
+        if target_client_field:
+            explicit_targets.append(str(target_client_field))
+
+        if broadcast_flag and not explicit_targets:
+            explicit_targets.extend(self._trainer_client_ids())
+
+        # Default to the first available trainer to retain previous behaviour.
+        if not explicit_targets:
+            first_trainer = next(iter(self._trainer_client_ids()), None)
+            if first_trainer:
+                explicit_targets.append(first_trainer)
+
+        if not explicit_targets:
+            return
+
+        payload = dict(stats)
+        payload.pop("target_client", None)
+
+        for target_client in explicit_targets:
+            self._send_ws(
+                {
+                    "type": "logs",
+                    "from_client": str(self._client_uuid),
+                    "target_scope": "per_client",
+                    "target_client": target_client,
+                    "payload": payload,
+                    "timestamp": time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime()),
+                }
+            )
 
     def send_status(self, status: MutableMapping[str, Any]) -> None:
         """Status from OSC/whisper/pishock."""
@@ -187,7 +224,12 @@ class RemoteServerInterface:
     # Session management ---------------------------------------------
     def start_session(self, session_label: str | None = None) -> dict[str, Any]:
         session_id = (session_label or f"s-{uuid.uuid4().hex[:6]}").strip()
-        payload = {"session_id": session_id, "client_uuid": str(self._client_uuid), "role": self._server_role}
+        payload = {
+            "session_id": session_id,
+            "client_uuid": str(self._client_uuid),
+            "role": self._role,
+            "username": self._username,
+        }
         data = self._post("/sessions", payload)
         self._session_id = data.get("session_id")
         self._session_state = "hosting"
@@ -204,7 +246,11 @@ class RemoteServerInterface:
         if not cleaned:
             raise ValueError("Session code cannot be empty")
 
-        payload = {"client_uuid": str(self._client_uuid), "role": self._server_role}
+        payload = {
+            "client_uuid": str(self._client_uuid),
+            "role": self._role,
+            "username": self._username,
+        }
         data = self._post(f"/sessions/{cleaned}/join", payload)
         self._session_id = data.get("session_id", cleaned)
         self._session_state = "joined"
@@ -223,11 +269,13 @@ class RemoteServerInterface:
             except Exception:
                 pass
             self._record_event_string(f"left session {self._session_id}")
+        self._close_ws()
         self._session_id = None
         self._session_state = "idle"
         self._session_users = []
         self._events = []
         self._last_event_id = None
+        self._latest_settings_by_trainer = {}
         return self.get_session_details()
 
     def get_session_details(self) -> dict[str, Any]:
@@ -252,14 +300,17 @@ class RemoteServerInterface:
     def set_username(self, username: str) -> None:
         cleaned = username.strip()
         self._username = cleaned or "Anonymous"
+        if self._session_id and self._connected:
+            try:
+                self._post(
+                    f"/sessions/{self._session_id}/username",
+                    {"client_uuid": str(self._client_uuid), "username": self._username},
+                )
+            except Exception as exc:
+                self._log(f"username update failed: {exc}")
 
     def set_role(self, role: str) -> None:
         self._role = "trainer" if role == "trainer" else "pet"
-
-    @property
-    def _server_role(self) -> str:
-        """Map UI-facing role names to server-facing leader/follower."""
-        return "leader" if self._role == "trainer" else "follower"
 
     # Server → client polling ----------------------------------------
     def poll_events(
@@ -287,6 +338,13 @@ class RemoteServerInterface:
     def latest_settings(self) -> dict[str, Any]:
         return dict(self._latest_settings)
 
+    def get_trainer_settings(self, trainer_client_id: str | None) -> dict[str, Any]:
+        """Return the last config payload sent by the given trainer, if any."""
+
+        if trainer_client_id and trainer_client_id in self._latest_settings_by_trainer:
+            return dict(self._latest_settings_by_trainer[trainer_client_id])
+        return self.latest_settings
+
     # Internal helpers -----------------------------------------------
     def _capture_session(self, session: dict[str, Any]) -> None:
         # Control-plane responses are minimal; keep any available metadata.
@@ -310,6 +368,9 @@ class RemoteServerInterface:
 
     def _format_event(self, evt: dict[str, Any]) -> str:
         evt_type = (evt.get("type") or "").lower()
+        error_msg = evt.get("error")
+        if error_msg:
+            return f"error: {error_msg}"
         payload = evt.get("payload") or {}
         if evt_type == "status":
             return ""
@@ -322,6 +383,23 @@ class RemoteServerInterface:
         if evt_type == "config":
             return "config updated"
         return evt_type or "event"
+
+    def _pick_trainer_target(self) -> str | None:
+        """Return the first trainer client_uuid in the session roster, if any."""
+
+        for user in self._session_users:
+            if str(user.get("role", "")).lower() == "trainer":
+                client_id = user.get("client_uuid")
+                if client_id:
+                    return str(client_id)
+        return None
+
+    def _trainer_client_ids(self) -> list[str]:
+        return [
+            str(u.get("client_uuid"))
+            for u in self._session_users
+            if str(u.get("role", "")).lower() == "trainer" and u.get("client_uuid")
+        ]
 
     def _refresh_session_users(self, *, force: bool = False) -> None:
         """Fetch the latest session participant roster from the server."""
@@ -386,7 +464,11 @@ class RemoteServerInterface:
             try:
                 data = json.loads(msg)
                 if data.get("type") == "config":
-                    self._latest_settings = data.get("payload", {})
+                    payload = data.get("payload", {})
+                    self._latest_settings = payload
+                    from_client = str(data.get("from_client") or "")
+                    if from_client:
+                        self._latest_settings_by_trainer[from_client] = payload
                 self._incoming.put(data)
                 self._record_event(data)
             except Exception:
@@ -419,3 +501,19 @@ class RemoteServerInterface:
             self._ws.send(json.dumps(message))
         except Exception as exc:
             self._log(f"ws send failed: {exc}")
+
+    def _close_ws(self) -> None:
+        """Stop websocket thread and close connection if active."""
+
+        self._ws_stop.set()
+        ws, thread = self._ws, self._ws_thread
+        self._ws = None
+        self._ws_thread = None
+
+        if ws:
+            try:
+                ws.close()
+            except Exception:
+                pass
+        if thread and thread.is_alive():
+            thread.join(timeout=1.0)

@@ -138,10 +138,12 @@ class StatusIndicator(ttk.Frame):
 class ScrollableFrame(ttk.Frame):
     """A frame with a vertical scrollbar that appears when content is taller than the available space."""
 
-    def __init__(self, master, **kwargs) -> None:
+    def __init__(self, master, *, min_height: int | None = None, **kwargs) -> None:
         super().__init__(master, **kwargs)
 
         self._canvas = tk.Canvas(self, borderwidth=0, highlightthickness=0)
+        if min_height is not None:
+            self._canvas.configure(height=min_height)
         self._v_scrollbar = ttk.Scrollbar(self, orient="vertical", command=self._canvas.yview)
         self.container = ttk.Frame(self._canvas)
 
