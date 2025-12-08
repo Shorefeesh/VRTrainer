@@ -103,10 +103,16 @@ class PiShockInterface:
             print("PiShock not enabled")
             return
 
+        # Normalise inputs to avoid type errors in the PiShock library
+        # (e.g. floats from features like the Pronouns word game).
+        safe_strength = int(round(float(strength)))
+        safe_strength = max(0, min(100, safe_strength))
+        safe_duration = max(0.0, float(duration))
+
         # Always emit an OSC parameter so the avatars can react visually
         # to shocks, even if the PiShock API itself is not configured
         # or connected.
-        self._send_shock_osc(strength=strength, duration=duration)
+        self._send_shock_osc(strength=safe_strength, duration=safe_duration)
 
         if not self._connected:
             print("PiShock not connected")
@@ -119,9 +125,13 @@ class PiShockInterface:
 
         print("PiShock sending shock start2")
 
-        shocker.shock(duration=duration, intensity=strength)
-
-        print("PiShock sending shock done")
+        try:
+            shocker.shock(duration=safe_duration, intensity=safe_strength)
+            print("PiShock sending shock done")
+        except Exception as exc:
+            # Surface the error so users can see why the shock failed,
+            # but avoid crashing the caller.
+            print(f"PiShock sending shock failed: {exc}")
 
     def send_vibrate(
         self,

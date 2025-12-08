@@ -40,6 +40,7 @@ class ForbiddenWordsFeature:
         self.server = server
         self._logger = logger
         self._running = False
+        self._active = False
 
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
@@ -97,6 +98,15 @@ class ForbiddenWordsFeature:
         while not self._stop_event.is_set():
             active_configs = self._active_trainer_configs()
             self._prune_inactive_states(active_configs)
+
+            now_active = bool(active_configs)
+            if now_active and not self._active:
+                # Feature just became active; discard any buffered speech.
+                try:
+                    self.whisper.reset_tag(self._whisper_tag)
+                except Exception:
+                    pass
+            self._active = now_active
 
             if not active_configs:
                 if self._stop_event.wait(self._poll_interval):

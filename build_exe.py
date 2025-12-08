@@ -44,6 +44,9 @@ def main() -> None:
         "--hidden-import=pythonosc",
         "--hidden-import=pishock",
         "--hidden-import=yaml",
+        "--hidden-import=matplotlib",
+        "--hidden-import=requests",
+        "--hidden-import=websocket_client",
         str(root / "main.py"),
     ]
 

@@ -36,6 +36,7 @@ class WordFeature:
         self.server = server
         self._logger = logger
         self._running = False
+        self._active = False
 
         # Background worker thread that consumes Whisper transcripts.
         self._thread: Optional[threading.Thread] = None
@@ -127,6 +128,15 @@ class WordFeature:
             if active_game != self._active_game:
                 self._log(f"event=word_game_changed active={active_game or 'none'}")
                 self._active_game = active_game
+
+            now_active = bool(active_game)
+            if now_active and not self._active:
+                # Word game just became active; ignore any old speech.
+                try:
+                    self.whisper.reset_tag(self._whisper_tag)
+                except Exception:
+                    pass
+            self._active = now_active
 
             if not active_game:
                 if self._stop_event.wait(0.5):

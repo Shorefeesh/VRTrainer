@@ -92,7 +92,15 @@ class TrainerTricksFeature:
 
     # Internal helpers -------------------------------------------------
     def set_enabled(self, enabled: bool) -> None:
-        self._enabled = bool(enabled)
+        enabled = bool(enabled)
+        if enabled and not self._enabled:
+            # Discard any queued transcript so we only react to speech
+            # that happens after the feature is enabled.
+            try:
+                self.whisper.reset_tag(self._whisper_tag)
+            except Exception:
+                pass
+        self._enabled = enabled
 
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():

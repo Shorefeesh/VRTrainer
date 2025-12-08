@@ -120,7 +120,7 @@ class WhisperInterface:
                 # Let users override the device/compute type via environment
                 # variables, but default to CPU to avoid CUDA/cuDNN issues on
                 # machines without a full GPU toolchain installed.
-                device = os.environ.get("WHISPER_DEVICE", "cpu")
+                device = os.environ.get("WHISPER_DEVICE", "cuda")
                 compute_type = os.environ.get("WHISPER_COMPUTE_TYPE")
                 if device:
                     kwargs["device"] = device
@@ -129,25 +129,9 @@ class WhisperInterface:
 
                 backend_label = self._format_backend_label(device, compute_type)
 
-                try:  # pragma: no cover - environment/model specific
-                    _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
-                    _SHARED_WHISPER_BACKEND = backend_label
-                except Exception:
-                    # If model load fails (e.g. missing CUDA/cuDNN when the
-                    # GPU backend is requested), fall back to a safe CPU-only
-                    # configuration before giving up.
-                    if device != "cpu":
-                        try:
-                            kwargs["device"] = "cpu"
-                            kwargs.pop("compute_type", None)
-                            _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
-                            _SHARED_WHISPER_BACKEND = "CPU"
-                        except Exception:
-                            self._running = True
-                            return
-                    else:
-                        self._running = True
-                        return
+                _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
+                _SHARED_WHISPER_BACKEND = backend_label
+
             elif _SHARED_WHISPER_BACKEND is None:
                 # Model is already loaded but backend label was not set; fall
                 # back to an unknown marker instead of lying.

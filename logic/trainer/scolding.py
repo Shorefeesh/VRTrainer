@@ -74,7 +74,14 @@ class TrainerScoldingFeature:
 
     # Internal helpers -------------------------------------------------
     def set_enabled(self, enabled: bool) -> None:
-        self._enabled = bool(enabled)
+        enabled = bool(enabled)
+        if enabled and not self._enabled:
+            # Flush old transcript entries so only fresh speech is considered.
+            try:
+                self.whisper.reset_tag(self._whisper_tag)
+            except Exception:
+                pass
+        self._enabled = enabled
 
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():
