@@ -12,7 +12,6 @@ TRAINER_SETTINGS_KEYS = [
     "feature_scolding",
     "feature_forbidden_words",
     "feature_ear_tail",
-    "feature_pronouns",
     "word_game",
     "delay_scale",
     "cooldown_scale",
@@ -61,7 +60,6 @@ def default_profile_settings(profile_name: str) -> Dict[str, Any]:
         "feature_scolding": False,
         "feature_forbidden_words": False,
         "feature_ear_tail": False,
-        "feature_pronouns": False,
         "word_game": "None",
         "delay_scale": 1.0,
         "cooldown_scale": 1.0,
@@ -96,6 +94,13 @@ def update_profile_from_settings(config: Dict[str, Any], settings: Dict[str, Any
     # Remove legacy PiShock fields that are no longer stored on trainer profiles.
     existing.pop("pishock_username", None)
     existing.pop("pishock_api_key", None)
+
+    # Word games are now represented by a chosen game name; keep the legacy
+    # pronouns flag in sync for backward compatibility.
+    word_game_provided = "word_game" in settings
+    word_game = settings.get("word_game")
+    if word_game is not None:
+        existing["word_game"] = word_game
 
     for key in TRAINER_SETTINGS_KEYS:
         if key in settings:
