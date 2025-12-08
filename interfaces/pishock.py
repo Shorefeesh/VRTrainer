@@ -72,6 +72,8 @@ class PiShockInterface:
 
         self._shocker = api.shocker(self.share_code)
 
+        self._shocker.vibrate(duration=1, intensity=100)
+
         self.logger.info("PiShock verify success")
 
     def stop(self) -> None:
