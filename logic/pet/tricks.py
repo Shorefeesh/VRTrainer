@@ -55,7 +55,7 @@ class TricksFeature:
         self._state_by_trainer: Dict[str, _TrainerTrickState] = {}
 
         self._poll_interval: float = 0.2
-        self._base_command_timeout: float = 5.0
+        self._base_command_timeout: float = 10.0
         self._base_cooldown_seconds: float = 2.0
         self._base_shock_strength: float = 35
         self._base_shock_duration: float = 0.5
@@ -187,32 +187,47 @@ class TricksFeature:
 
     def _is_command_completed(self, command: str) -> bool:
         if command == "paw":
-            return self.osc.get_bool_param("Trainer/Paw", default=False)
+            return (self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
+                   ^ self.osc.get_bool_param("Trainer/HandFloorRight", default=False)) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HeadFloor", default=False)
         elif command == "sit":
-            return self.osc.get_bool_param("Trainer/HandNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsNearFloor", default=False) \
-                   and not self.osc.get_bool_param("Trainer/HeadNearFloor", default=False)
+            return self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
+                   and self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HeadFloor", default=False)
         elif command == "lay_down":
-            return self.osc.get_bool_param("Trainer/HandNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HeadNearFloor", default=False)
+            return self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
+                   and self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
+                   and self.osc.get_bool_param("Trainer/HeadFloor", default=False)
         elif command == "beg":
-            return not self.osc.get_bool_param("Trainer/HandNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsNearFloor", default=False) \
-                   and not self.osc.get_bool_param("Trainer/HeadNearFloor", default=False)
+            return not self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HeadFloor", default=False)
         elif command == "play_dead":
-            return not self.osc.get_bool_param("Trainer/HandNearFloor", default=False) \
-                   and not self.osc.get_bool_param("Trainer/FootNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HeadNearFloor", default=False)
+            return not self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
+                   and not self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
+                   and not self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
+                   and self.osc.get_bool_param("Trainer/HeadFloor", default=False)
         elif command == "roll_over":
-            return not self.osc.get_bool_param("Trainer/HandNearFloor", default=False) \
-                   and not self.osc.get_bool_param("Trainer/FootNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsNearFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HeadNearFloor", default=False)
+            return not self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
+                   and not self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
+                   and not self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
+                   and self.osc.get_bool_param("Trainer/HeadFloor", default=False)
 
         return False
 

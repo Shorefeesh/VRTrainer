@@ -129,7 +129,7 @@ class WhisperInterface:
 
                 backend_label = self._format_backend_label(device, compute_type)
 
-                _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
+                _SHARED_WHISPER_MODEL = WhisperModel("medium", **kwargs)
                 _SHARED_WHISPER_BACKEND = backend_label
 
             elif _SHARED_WHISPER_BACKEND is None:
@@ -361,11 +361,11 @@ class WhisperInterface:
                         # Use the built-in VAD filter when supported to
                         # further reduce noise-only segments.
                         try:
-                            segments, _info = model.transcribe(audio, vad_filter=True)
+                            segments, _info = model.transcribe(audio, vad_filter=True, language="en")
                         except TypeError:
                             # Older faster_whisper versions may not
                             # support vad_filter; fall back gracefully.
-                            segments, _info = model.transcribe(audio)
+                            segments, _info = model.transcribe(audio, language="en")
                     except Exception:
                         # On any transcription error, skip this block.
                         continue

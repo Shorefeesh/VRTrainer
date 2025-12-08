@@ -40,12 +40,17 @@ class VRChatOSCInterface:
         }
         self._expected_pet_params: set[str] = {
             "Trainer/Proximity",
-            "Trainer/Focus",
+            "Trainer/EyeLeft",
+            "Trainer/EyeFarLeft",
+            "Trainer/EyeRight",
+            "Trainer/EyeFarRight",
             "Trainer/Paw",
-            "Trainer/HandNearFloor",
-            "Trainer/FootNearFloor",
-            "Trainer/HeadNearFloor",
-            "Trainer/HipsNearFloor",
+            "Trainer/HipsFloor",
+            "Trainer/HeadFloor",
+            "Trainer/HandFloorLeft",
+            "Trainer/HandFloorRight",
+            "Trainer/FootFloorLeft",
+            "Trainer/FootFloorRight",
             "LeftEar_IsGrabbed",
             "LeftEar_Stretch",
             "RightEar_IsGrabbed",
@@ -59,7 +64,7 @@ class VRChatOSCInterface:
         self._log_relevant_events = log_relevant_events
 
         self._tx_client = None
-        
+
         self._server = None
         self._thread = None
 
