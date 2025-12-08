@@ -138,7 +138,10 @@ class ForbiddenWordsFeature:
         server = self.server
         if server is None:
             return {}
-        configs = getattr(server, "latest_settings_by_trainer", lambda: {})()
+        raw_configs = getattr(server, "latest_settings_by_trainer", None)
+        configs = raw_configs() if callable(raw_configs) else raw_configs
+        if not isinstance(configs, dict):
+            configs = {}
         return {tid: cfg for tid, cfg in configs.items() if cfg.get("feature_forbidden_words")}
 
     def _prune_inactive_states(self, active_configs: Dict[str, dict]) -> None:

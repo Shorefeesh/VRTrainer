@@ -121,7 +121,10 @@ class FocusFeature:
         if server is None:
             return {}
 
-        configs = getattr(server, "latest_settings_by_trainer", lambda: {})()
+        raw_configs = getattr(server, "latest_settings_by_trainer", None)
+        configs = raw_configs() if callable(raw_configs) else raw_configs
+        if not isinstance(configs, dict):
+            configs = {}
         return {tid: cfg for tid, cfg in configs.items() if cfg.get("feature_focus")}
 
     def _prune_inactive_states(self, active_configs: Dict[str, dict]) -> None:
@@ -133,15 +136,7 @@ class FocusFeature:
         if self.server is None:
             return {}
 
-        events = self.server.poll_events(
-            limit=10,
-            predicate=lambda evt: (
-                isinstance(evt, dict)
-                and isinstance(evt.get("payload"), dict)
-                and evt.get("payload", {}).get("type") == "command"
-                and evt.get("payload", {}).get("meta", {}).get("feature") == "focus"
-            ),
-        )
+        events = self.server.poll_feature_events("focus", limit=10)
 
         grouped: Dict[str, List[dict]] = {}
         for event in events:

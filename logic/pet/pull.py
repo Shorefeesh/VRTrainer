@@ -105,7 +105,10 @@ class PullFeature:
         if server is None:
             return False
 
-        configs = getattr(server, "latest_settings_by_trainer", lambda: {})()
+        raw_configs = getattr(server, "latest_settings_by_trainer", None)
+        configs = raw_configs() if callable(raw_configs) else raw_configs
+        if not isinstance(configs, dict):
+            configs = {}
         return any(cfg.get("feature_ear_tail") for cfg in configs.values())
 
     def _check_and_maybe_shock(self, now: float) -> bool:

@@ -67,6 +67,12 @@ class RemoteServerInterface:
         self._ws_thread: threading.Thread | None = None
         self._ws_stop = threading.Event()
         self._incoming: "queue.Queue[dict[str, Any]]" = queue.Queue()
+        # Preserve events that were not consumed by a predicate so other
+        # features can still process them.
+        self._pending_events: deque[dict[str, Any]] = deque()
+        # Per-feature event buffers to avoid cross-consumption between
+        # independent pet features.
+        self._feature_queues: dict[str, deque[dict[str, Any]]] = {}
 
     # Internal connection state helpers ----------------------------
     def _mark_disconnected(self, reason: str | None = None) -> None:
@@ -102,6 +108,8 @@ class RemoteServerInterface:
         self._seen_event_ids_set.clear()
         self._stats_by_user = {}
         self._close_ws()
+        self._pending_events.clear()
+        self._feature_queues.clear()
 
     def record_local_event(self, message: str) -> None:
         """Append a log line to the session event list without server IO."""
@@ -276,6 +284,7 @@ class RemoteServerInterface:
         self._events = []
         self._last_event_id = None
         self._latest_settings_by_trainer = {}
+        self._pending_events.clear()
         return self.get_session_details()
 
     def get_session_details(self) -> dict[str, Any]:
@@ -320,15 +329,29 @@ class RemoteServerInterface:
             return []
 
         matched: list[dict[str, Any]] = []
-        drained: int = 0
-        while drained < limit:
-            try:
-                evt = self._incoming.get_nowait()
-            except queue.Empty:
-                break
-            drained += 1
+        inspected: int = 0
+
+        while inspected < limit:
+            evt: dict[str, Any] | None = None
+
+            if self._pending_events:
+                evt = self._pending_events.popleft()
+            else:
+                try:
+                    evt = self._incoming.get_nowait()
+                except queue.Empty:
+                    break
+
+            inspected += 1
+
             if predicate is None or predicate(evt):
                 matched.append(evt)
+            else:
+                # Keep for other pollers; avoid unbounded growth by trimming.
+                self._pending_events.append(evt)
+                if len(self._pending_events) > 200:
+                    self._pending_events.popleft()
+
         return matched
 
     def get_setting(self, key: str, default: Any = None) -> Any:
@@ -480,8 +503,7 @@ class RemoteServerInterface:
                     from_client = str(data.get("from_client") or "")
                     if from_client:
                         self._latest_settings_by_trainer[from_client] = payload
-                self._incoming.put(data)
-                self._record_event(data)
+                self._route_incoming_event(data)
             except Exception:
                 return
 
@@ -528,3 +550,75 @@ class RemoteServerInterface:
                 pass
         if thread and thread.is_alive():
             thread.join(timeout=1.0)
+        self._feature_queues.clear()
+
+    # Event routing --------------------------------------------------
+    _FEATURE_FLAG_KEYS = {
+        "focus": "feature_focus",
+        "proximity": "feature_proximity",
+        "tricks": "feature_tricks",
+        "scolding": "feature_scolding",
+    }
+
+    def _route_incoming_event(self, event: dict[str, Any]) -> None:
+        """Fan out server events to per-feature queues and drop disabled ones."""
+
+        payload = event.get("payload") or {}
+        meta = payload.get("meta") or {}
+        feature = str(meta.get("feature") or "").lower().strip()
+
+        if feature:
+            trainer_id = str(event.get("from_client") or "")
+
+            if not self._is_feature_enabled(feature, trainer_id):
+                # Drop immediately when the trainer has that feature disabled.
+                return
+
+            queue_ref = self._feature_queues.setdefault(feature, deque())
+            queue_ref.append(event)
+            # Prevent unbounded growth; keep latest 200 events per feature.
+            if len(queue_ref) > 200:
+                queue_ref.popleft()
+        else:
+            self._incoming.put(event)
+
+        self._record_event(event)
+
+    def _is_feature_enabled(self, feature: str, trainer_id: str | None) -> bool:
+        flag_key = self._FEATURE_FLAG_KEYS.get(feature)
+        if not flag_key:
+            return True
+
+        if trainer_id and trainer_id in self._latest_settings_by_trainer:
+            return bool(self._latest_settings_by_trainer[trainer_id].get(flag_key))
+
+        return bool(self._latest_settings.get(flag_key))
+
+    def poll_feature_events(self, feature: str, limit: int = 10, *, trainer_id: str | None = None) -> list[dict[str, Any]]:
+        """Return up to ``limit`` events for a specific feature.
+
+        When a ``trainer_id`` is provided, events from other trainers are left
+        in the queue for later consumption by their corresponding loops.
+        """
+
+        feature = feature.lower().strip()
+        queue_ref = self._feature_queues.get(feature)
+        if not queue_ref:
+            return []
+
+        matched: list[dict[str, Any]] = []
+        inspected = 0
+        queue_len = len(queue_ref)
+
+        # Only scan the current length to avoid starvation if producers are busy.
+        while inspected < queue_len and len(matched) < limit:
+            evt = queue_ref.popleft()
+            inspected += 1
+
+            from_client = str(evt.get("from_client") or "")
+            if trainer_id is None or from_client == str(trainer_id):
+                matched.append(evt)
+            else:
+                queue_ref.append(evt)
+
+        return matched

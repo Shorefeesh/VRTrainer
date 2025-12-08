@@ -19,11 +19,7 @@ class PiShockInterface:
             username: PiShock account username.
             api_key: PiShock API key.
             role: Which runtime is using this interface, ``\"trainer\"``
-                or ``\"pet\"``. This is used only to decide which OSC
-                parameter name to drive on the avatar:
-
-                * trainer mode: ``Trainer/SendingShock``
-                * pet mode: ``Trainer/BeingShocked``
+                or ``\"pet\"``.
         """
         self.username: Optional[str] = username
         self.api_key: Optional[str] = api_key
@@ -71,9 +67,9 @@ class PiShockInterface:
         self._api = api
         self._connected = True
 
-        # If we already have a share code configured, prepare a shocker instance.
-        if self.share_code:
-            self._shocker = api.shocker(self.share_code)
+        self._shocker = api.shocker(self.share_code)
+
+        print("PiShock verify success")
 
     def stop(self) -> None:
         """Tear down connection or cleanup resources."""
@@ -93,8 +89,6 @@ class PiShockInterface:
         self,
         strength: int,
         duration: float,
-        *,
-        share_code: Optional[str] = None,
     ) -> None:
         """Send a shock with the given strength and duration.
 
@@ -102,15 +96,45 @@ class PiShockInterface:
             strength: Shock intensity (0-100).
             duration: Shock duration in seconds. Can be a float in the
                 0-1 range or an integer 0–15 for whole seconds.
-            share_code: Optional override for the share code. If not
-                given, the interface uses the configured default (see
-                :meth:`configure_share_code`).
-
-        This method is safe to call even when PiShock is not configured
-        yet; in that case it simply returns without raising.
         """
         print("PiShock sending shock start")
 
+        if not self._enabled:
+            print("PiShock not enabled")
+            return
+
+        # Always emit an OSC parameter so the avatars can react visually
+        # to shocks, even if the PiShock API itself is not configured
+        # or connected.
+        self._send_shock_osc(strength=strength, duration=duration)
+
+        if not self._connected:
+            print("PiShock not connected")
+            return
+
+        shocker = self._shocker
+        if shocker is None:
+            print("PiShock no shocker")
+            return
+
+        print("PiShock sending shock start2")
+
+        shocker.shock(duration=duration, intensity=strength)
+
+        print("PiShock sending shock done")
+
+    def send_vibrate(
+        self,
+        strength: int,
+        duration: float,
+    ) -> None:
+        """Send a vibrate with the given strength and duration.
+
+        Args:
+            strength: Vibrate intensity (0-100).
+            duration: Vibrate duration in seconds. Can be a float in the
+                0-1 range or an integer 0–15 for whole seconds.
+        """
         if not self._enabled:
             return
 
@@ -119,94 +143,14 @@ class PiShockInterface:
         # or connected.
         self._send_shock_osc(strength=strength, duration=duration)
 
-
         if not self._connected:
             return
 
-        api = self._api
-        if api is None:
-            return
-
-        # Determine which shocker/share code to use.
-        code = share_code or self._share_code
-        if not code:
-            # No share code configured yet – nothing to do.
-            return
-
         shocker = self._shocker
-        if shocker is None or shocker.sharecode != code:  # type: ignore[attr-defined]
-            shocker = api.shocker(code)
-            self._shocker = shocker
-
-        print("PiShock sending shock start2")
-
-        try:
-            shocker.shock(duration=duration, intensity=strength)
-        except Exception:
-            # For now, swallow all errors so that a failed shock does
-            # not bring down feature logic. Diagnostics can be added
-            # later (logging, UI feedback, etc.).
+        if shocker is None:
             return
 
-        print("PiShock sending shock done")
-
-    def send_vibrate(
-        self,
-        strength: int,
-        duration: float,
-        *,
-        share_code: Optional[str] = None,
-    ) -> None:
-        """Send a vibrate with the given strength and duration.
-
-        Args:
-            strength: Vibrate intensity (0-100).
-            duration: Vibrate duration in seconds. Can be a float in the
-                0-1 range or an integer 0–15 for whole seconds.
-            share_code: Optional override for the share code. If not
-                given, the interface uses the configured default (see
-                :meth:`configure_share_code`).
-
-        This method is safe to call even when PiShock is not configured
-        yet; in that case it simply returns without raising.
-        """
-        print("PiShock sending vibrate start")
-
-        if not self._enabled:
-            return
-
-        # Always emit an OSC parameter so the avatars can react visually
-        # to vibrates, even if the PiShock API itself is not configured
-        # or connected.
-        self._send_shock_osc(strength=strength, duration=duration)
-
-        if not self._connected:
-            return
-
-        api = self._api
-        if api is None:
-            return
-
-        # Determine which shocker/share code to use.
-        code = share_code or self._share_code
-        if not code:
-            # No share code configured yet – nothing to do.
-            return
-
-        shocker = self._shocker
-        if shocker is None or shocker.sharecode != code:  # type: ignore[attr-defined]
-            shocker = api.shocker(code)
-            self._shocker = shocker
-
-        print("PiShock sending vibrate start2")
-
-        try:
-            shocker.vibrate(duration=duration, intensity=strength)
-        except Exception:
-            # For now, swallow all errors so that a failed vibrate does
-            # not bring down feature logic. Diagnostics can be added
-            # later (logging, UI feedback, etc.).
-            return
+        shocker.vibrate(duration=duration, intensity=strength)
 
     # Internal helpers -------------------------------------------------
     def _send_shock_osc(self, strength: int, duration: float) -> None:
@@ -234,13 +178,8 @@ class PiShockInterface:
         # Normalise strength (0–100) to a 0–1 float for OSC.
         value = max(0.0, min(1.0, float(strength) / 100.0))
 
-        # Decide which OSC addresses to drive based on runtime role.
-        if self._role == "trainer":
-            addresses = ["/avatar/parameters/Trainer/SendingShock"]
-            thread_name = "TrainerSendingShockOSC"
-        else:
-            addresses = ["/avatar/parameters/Trainer/BeingShocked"]
-            thread_name = "PetBeingShockedOSC"
+        addresses = ["/avatar/parameters/Trainer/BeingShocked"]
+        thread_name = "PetBeingShockedOSC"
 
         def _worker() -> None:
             try:

@@ -157,7 +157,10 @@ class WordFeature:
         if server is None:
             return None
 
-        configs = getattr(server, "latest_settings_by_trainer", lambda: {})()
+        raw_configs = getattr(server, "latest_settings_by_trainer", None)
+        configs = raw_configs() if callable(raw_configs) else raw_configs
+        if not isinstance(configs, dict):
+            configs = {}
         for cfg in configs.values():
             game = str(cfg.get("word_game") or "").strip()
             if game and self._normalise_game_name(game) not in ("none", "off", "disabled"):
