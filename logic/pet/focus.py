@@ -151,7 +151,7 @@ class FocusFeature:
         return grouped
 
     def _update_meter(self, state: "_TrainerFocusState", dt: float) -> None:
-        focused = self.osc.get_bool_param("Trainer/Focus", default=False)
+        focused = self.osc.get_bool_param("Trainer/Focus", default=True)
         delta = (self._fill_rate if focused else -self._drain_rate) * dt
         state.focus_meter = max(0.0, min(1.0, state.focus_meter + delta))
 

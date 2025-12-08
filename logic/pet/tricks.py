@@ -233,7 +233,7 @@ class TricksFeature:
 
     def _deliver_task_start_signal(self) -> None:
         try:
-            self.pishock.send_shock(strength=1, duration=0.2)
+            self.pishock.send_vibrate(strength=10, duration=0.2)
             self._log("event=shock feature=tricks runtime=pet reason=task_start strength=1")
         except Exception:
             return
@@ -241,7 +241,7 @@ class TricksFeature:
     def _deliver_completion_signal(self) -> None:
         try:
             for pulse in (1, 2):
-                self.pishock.send_shock(strength=1, duration=0.2)
+                self.pishock.send_vibrate(strength=10, duration=0.2)
                 self._log(f"event=shock feature=tricks runtime=pet reason=task_complete pulse={pulse} strength=1")
                 if pulse == 1:
                     time.sleep(0.2)

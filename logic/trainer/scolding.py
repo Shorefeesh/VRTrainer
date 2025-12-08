@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from typing import Callable, Dict
 
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.server import RemoteServerInterface
@@ -18,6 +19,7 @@ class TrainerScoldingFeature:
         osc: VRChatOSCInterface | None = None,
         *,
         scolding_words: list[str] | None = None,
+        config_provider: Callable[[], Dict[str, dict]] | None = None,
         logger: LogFile | None = None,
     ) -> None:
         self.whisper = whisper
@@ -28,6 +30,7 @@ class TrainerScoldingFeature:
         self._running = False
 
         self._whisper_tag = "trainer_scolding_feature"
+        self._config_provider = config_provider
         self._scolding_phrases = [self._normalise(word) for word in (scolding_words or []) if self._normalise(word)]
         self._poll_interval = 0.2
 
@@ -96,25 +99,44 @@ class TrainerScoldingFeature:
         if not normalised:
             return
 
-        phrases = self._get_scolding_phrases()
-        if not phrases:
+        pet_configs = self._iter_pet_configs()
+        if not pet_configs:
             return
 
-        if any(phrase in normalised for phrase in phrases):
-            try:
-                self.server.send_command(normalised, {"feature": "scolding"})
-                self._log("event=scold feature=scolding runtime=trainer text=" + normalised)
-                self._pulse_command_flag("Trainer/CommandScold")
-            except Exception:
-                pass
+        for pet_id, cfg in pet_configs.items():
+            if not str(pet_id):
+                continue
+            if not cfg.get("feature_scolding"):
+                continue
 
-    def _get_scolding_phrases(self) -> list[str]:
+            phrases = self._get_scolding_phrases(cfg)
+            if not phrases:
+                continue
+
+            if any(phrase in normalised for phrase in phrases):
+                meta = {"feature": "scolding", "target_client": str(pet_id)}
+                try:
+                    self.server.send_command(normalised, meta)
+                    self._log(
+                        "event=scold feature=scolding runtime=trainer pet="
+                        + str(pet_id)[:8]
+                        + " text="
+                        + normalised
+                    )
+                    self._pulse_command_flag("Trainer/CommandScold")
+                except Exception:
+                    continue
+
+    def _get_scolding_phrases(self, config: dict | None) -> list[str]:
         if self._scolding_phrases:
             return self._scolding_phrases
 
         raw: list[str] = []
         try:
-            raw = self.server.get_setting("scolding_words", []) or []
+            if isinstance(config, dict):
+                raw = config.get("scolding_words", []) or []
+            else:
+                raw = self.server.get_setting("scolding_words", []) or []
         except Exception:
             raw = []
 
@@ -155,3 +177,15 @@ class TrainerScoldingFeature:
             osc.pulse_parameter(flag_name, value_on=1, value_off=0, duration=0.2)
         except Exception:
             return
+
+    # Config helpers -------------------------------------------------
+    def _iter_pet_configs(self) -> Dict[str, dict]:
+        provider = self._config_provider
+        if provider is None:
+            return {}
+
+        try:
+            configs = provider() or {}
+            return {pid: cfg for pid, cfg in configs.items() if isinstance(cfg, dict)}
+        except Exception:
+            return {}

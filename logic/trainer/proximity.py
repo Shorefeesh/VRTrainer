@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from typing import Callable, Dict
 
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.server import RemoteServerInterface
@@ -18,6 +19,7 @@ class TrainerProximityFeature:
         osc: VRChatOSCInterface | None = None,
         *,
         names: list[str] | None = None,
+        config_provider: Callable[[], Dict[str, dict]] | None = None,
         logger: LogFile | None = None,
     ) -> None:
         self.whisper = whisper
@@ -28,7 +30,8 @@ class TrainerProximityFeature:
         self._running = False
 
         self._whisper_tag = "trainer_proximity_feature"
-        self._pet_names = [self._normalise_text(name) for name in (names or []) if self._normalise_text(name)]
+        self._config_provider = config_provider
+        self._default_pet_names = [self._normalise_text(name) for name in (names or []) if self._normalise_text(name)]
         self._default_command_phrases: list[str] = ["come here", "heel"]
 
         self._poll_interval: float = 0.1
@@ -87,35 +90,53 @@ class TrainerProximityFeature:
             except Exception:
                 text = ""
 
-            if text and self._detect_summon_command(text):
-                try:
-                    self.server.send_command("summon", {"feature": "proximity"})
-                    self._log("event=command_start feature=proximity runtime=trainer name=summon")
-                    self._pulse_command_flag("Trainer/CommandSummon")
-                except Exception:
-                    pass
+            if text:
+                self._maybe_send_summon(text)
 
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def _detect_summon_command(self, text: str) -> bool:
+    def _maybe_send_summon(self, text: str) -> None:
         normalised = self._normalise_text(text)
         if not normalised:
-            return False
+            return
 
-        command_phrases = self._get_command_phrases()
-        if self._pet_names:
-            recent_chunks = self.whisper.get_recent_text_chunks(count=3)
-            recent_normalised = " ".join(self._normalise_text(chunk) for chunk in recent_chunks if chunk)
-            if not any(name in recent_normalised for name in self._pet_names):
-                return False
+        pet_configs = self._iter_pet_configs()
+        if not pet_configs:
+            return
 
-        return any(phrase in normalised for phrase in command_phrases)
+        for pet_id, cfg in pet_configs.items():
+            if not str(pet_id):
+                continue
+            if not cfg.get("feature_proximity"):
+                continue
 
-    def _get_command_phrases(self) -> list[str]:
+            command_phrases = self._get_command_phrases(cfg)
+            pet_names = self._extract_names(cfg)
+            if pet_names:
+                recent_chunks = self.whisper.get_recent_text_chunks(count=3)
+                recent_normalised = " ".join(self._normalise_text(chunk) for chunk in recent_chunks if chunk)
+                if not any(name in recent_normalised for name in pet_names):
+                    continue
+
+            if any(phrase in normalised for phrase in command_phrases):
+                meta = {"feature": "proximity", "target_client": str(pet_id)}
+                try:
+                    self.server.send_command("summon", meta)
+                    self._log(
+                        f"event=command_start feature=proximity runtime=trainer pet={str(pet_id)[:8]} name=summon"
+                    )
+                    self._pulse_command_flag("Trainer/CommandSummon")
+                except Exception:
+                    continue
+
+    def _get_command_phrases(self, config: dict | None) -> list[str]:
         raw: list[str] = []
         try:
-            raw = self.server.get_setting("command_words", []) or []
+            if isinstance(config, dict):
+                raw = config.get("command_words", []) or []
+            else:
+                raw = self.server.get_setting("command_words", []) or []
         except Exception:
             raw = []
 
@@ -159,3 +180,22 @@ class TrainerProximityFeature:
             osc.pulse_parameter(flag_name, value_on=1, value_off=0, duration=0.2)
         except Exception:
             return
+
+    # Config helpers -------------------------------------------------
+    def _iter_pet_configs(self) -> Dict[str, dict]:
+        provider = self._config_provider
+        if provider is None:
+            return {}
+
+        try:
+            configs = provider() or {}
+            return {pid: cfg for pid, cfg in configs.items() if isinstance(cfg, dict)}
+        except Exception:
+            return {}
+
+    def _extract_names(self, config: dict) -> list[str]:
+        names = config.get("names") if isinstance(config, dict) else None
+        pet_names = [self._normalise_text(n) for n in (names or []) if self._normalise_text(n)]
+        if not pet_names:
+            pet_names = list(self._default_pet_names)
+        return pet_names

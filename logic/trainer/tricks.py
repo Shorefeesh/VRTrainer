@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from typing import Callable, Dict
 
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.server import RemoteServerInterface
@@ -18,6 +19,7 @@ class TrainerTricksFeature:
         osc: VRChatOSCInterface | None = None,
         *,
         names: list[str] | None = None,
+        config_provider: Callable[[], Dict[str, dict]] | None = None,
         logger: LogFile | None = None,
     ) -> None:
         self.whisper = whisper
@@ -28,7 +30,8 @@ class TrainerTricksFeature:
         self._running = False
 
         self._whisper_tag = "trainer_tricks_feature"
-        self._pet_names = [self._normalise_text(name) for name in (names or []) if self._normalise_text(name)]
+        self._config_provider = config_provider
+        self._default_pet_names = [self._normalise_text(name) for name in (names or []) if self._normalise_text(name)]
 
         self._poll_interval: float = 0.2
         self._command_phrases: dict[str, list[str]] = {
@@ -103,19 +106,56 @@ class TrainerTricksFeature:
             except Exception:
                 text = ""
 
-            detected = self._detect_command(text)
-            if detected is not None:
-                try:
-                    self.server.send_command(detected, {"feature": "tricks"})
-                    self._log(f"event=command_start feature=tricks runtime=trainer name={detected}")
-                    self._pulse_command(detected)
-                except Exception:
-                    pass
+            pet_configs = self._iter_pet_configs()
+            if pet_configs and text:
+                first_sent: str | None = None
+                for pet_id, cfg in pet_configs.items():
+                    if not str(pet_id):
+                        continue
+                    if not cfg.get("feature_tricks"):
+                        continue
+
+                    pet_names = self._extract_names(cfg)
+                    detected = self._detect_command(text, pet_names)
+                    if detected is None:
+                        continue
+
+                    meta = {"feature": "tricks", "target_client": str(pet_id)}
+                    try:
+                        self.server.send_command(detected, meta)
+                        self._log(
+                            f"event=command_start feature=tricks runtime=trainer pet={str(pet_id)[:8]} name={detected}"
+                        )
+                        if first_sent is None:
+                            first_sent = detected
+                    except Exception:
+                        continue
+
+                if first_sent is not None:
+                    self._pulse_command(first_sent)
 
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def _detect_command(self, text: str) -> str | None:
+    def _iter_pet_configs(self) -> Dict[str, dict]:
+        provider = self._config_provider
+        if provider is None:
+            return {}
+
+        try:
+            configs = provider() or {}
+            return {pid: cfg for pid, cfg in configs.items() if isinstance(cfg, dict)}
+        except Exception:
+            return {}
+
+    def _extract_names(self, config: dict) -> list[str]:
+        names = config.get("names") if isinstance(config, dict) else None
+        pet_names = [self._normalise_text(n) for n in (names or []) if self._normalise_text(n)]
+        if not pet_names:
+            pet_names = list(self._default_pet_names)
+        return pet_names
+
+    def _detect_command(self, text: str, pet_names: list[str]) -> str | None:
         if not text:
             return None
 
@@ -123,10 +163,10 @@ class TrainerTricksFeature:
         if not normalised:
             return None
 
-        if self._pet_names:
+        if pet_names:
             recent_chunks = self.whisper.get_recent_text_chunks(count=3)
             recent_normalised = " ".join(self._normalise_text(chunk) for chunk in recent_chunks if chunk)
-            if not any(name in recent_normalised for name in self._pet_names):
+            if not any(name in recent_normalised for name in pet_names):
                 return None
 
         for cmd, phrases in self._command_phrases.items():

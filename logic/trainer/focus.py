@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import threading
+from typing import Callable, Dict
 
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.server import RemoteServerInterface
@@ -18,6 +19,7 @@ class TrainerFocusFeature:
         osc: VRChatOSCInterface | None = None,
         *,
         names: list[str] | None = None,
+        config_provider: Callable[[], Dict[str, dict]] | None = None,
         logger: LogFile | None = None,
     ) -> None:
         self.whisper = whisper
@@ -28,7 +30,8 @@ class TrainerFocusFeature:
         self._running = False
 
         self._whisper_tag: str = "trainer_focus_feature"
-        self._pet_names: list[str] = [self._normalise(name) for name in (names or []) if self._normalise(name)]
+        self._config_provider = config_provider
+        self._default_pet_names: list[str] = [self._normalise(name) for name in (names or []) if self._normalise(name)]
         self._default_command_phrases: list[str] = ["come here", "heel"]
         self._poll_interval: float = 0.1
 
@@ -97,30 +100,46 @@ class TrainerFocusFeature:
         if not normalised:
             return
 
-        penalties: list[str] = []
-        if self._pet_names and any(name in normalised for name in self._pet_names):
-            penalties.append("name")
-
-        command_words = self._get_command_phrases()
-        if any(cmd in normalised for cmd in command_words):
-            penalties.append("command_word")
-
-        if not penalties:
+        pet_configs = self._iter_pet_configs()
+        if not pet_configs:
             return
 
-        try:
-            self.server.send_command("focus", {"feature": "focus", "reasons": penalties, "text": normalised})
-            self._log(
-                f"event=command_start feature=focus runtime=trainer reasons={'|'.join(penalties)} text={normalised}"
-            )
-            self._pulse_command_flag("Trainer/CommandFocus")
-        except Exception:
-            pass
+        for pet_id, cfg in pet_configs.items():
+            if not str(pet_id):
+                continue
+            if not cfg.get("feature_focus"):
+                continue
 
-    def _get_command_phrases(self) -> list[str]:
+            penalties: list[str] = []
+            pet_names = self._extract_names(cfg)
+            if pet_names and any(name in normalised for name in pet_names):
+                penalties.append("name")
+
+            command_words = self._get_command_phrases(cfg)
+            if any(cmd in normalised for cmd in command_words):
+                penalties.append("command_word")
+
+            if not penalties:
+                continue
+
+            meta = {"feature": "focus", "reasons": penalties, "text": normalised, "target_client": str(pet_id)}
+
+            try:
+                self.server.send_command("focus", meta)
+                self._log(
+                    f"event=command_start feature=focus runtime=trainer pet={str(pet_id)[:8]} reasons={'|'.join(penalties)} text={normalised}"
+                )
+                self._pulse_command_flag("Trainer/CommandFocus")
+            except Exception:
+                continue
+
+    def _get_command_phrases(self, config: dict | None) -> list[str]:
         raw = []
         try:
-            raw = self.server.get_setting("command_words", []) or []
+            if isinstance(config, dict):
+                raw = config.get("command_words", []) or []
+            else:
+                raw = self.server.get_setting("command_words", []) or []
         except Exception:
             raw = []
 
@@ -164,3 +183,22 @@ class TrainerFocusFeature:
             osc.pulse_parameter(flag_name, value_on=1, value_off=0, duration=0.2)
         except Exception:
             return
+
+    # Config helpers -------------------------------------------------
+    def _iter_pet_configs(self) -> Dict[str, dict]:
+        provider = self._config_provider
+        if provider is None:
+            return {}
+
+        try:
+            configs = provider() or {}
+            return {pid: cfg for pid, cfg in configs.items() if isinstance(cfg, dict)}
+        except Exception:
+            return {}
+
+    def _extract_names(self, config: dict) -> list[str]:
+        names = config.get("names") if isinstance(config, dict) else None
+        pet_names = [self._normalise(n) for n in (names or []) if self._normalise(n)]
+        if not pet_names:
+            pet_names = list(self._default_pet_names)
+        return pet_names

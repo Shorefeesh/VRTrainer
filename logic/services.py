@@ -12,6 +12,7 @@ from interfaces.whisper import WhisperInterface
 from interfaces.server import RemoteServerInterface
 from logic.logging_utils import SessionLogManager
 from logic.pet.focus import FocusFeature
+from logic.pet.forbidden import ForbiddenWordsFeature
 from logic.pet.wordgame import WordFeature
 from logic.pet.proximity import ProximityFeature
 from logic.pet.pull import PullFeature
@@ -187,6 +188,16 @@ def _prune_missing_pet_assignments(session_pets: List[Dict[str, Any]]) -> None:
         if pet_id not in active_ids:
             _pet_profile_assignments.pop(pet_id, None)
             _pet_profile_payloads.pop(pet_id, None)
+
+
+def get_assigned_pet_configs() -> Dict[str, Dict[str, Any]]:
+    """Return a shallow copy of current per-pet profile payloads.
+
+    Used by trainer-side features to route commands per pet using that pet's
+    assigned configuration (names, words, feature flags, etc.).
+    """
+
+    return {pid: dict(payload) for pid, payload in _pet_profile_payloads.items()}
 
 
 def assign_profile_to_pet(pet_client_id: str, profile_name: str | None, profile_settings: Dict[str, Any] | None) -> None:
@@ -387,7 +398,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
     )
 
     # Trainer mode keeps PiShock disabled; credentials are no longer collected on the trainer tab.
-    pishock = PiShockInterface(username="", api_key="", role="trainer")
+    pishock = PiShockInterface(username="", api_key="", share_code="", role="trainer")
 
     whisper = WhisperInterface(input_device=input_device)
 
@@ -403,6 +414,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
             server=server,
             osc=osc,
             names=trainer_settings.get("names") or [],
+            config_provider=get_assigned_pet_configs,
             logger=logs.get_logger("trainer_focus_feature.log"),
         ),
         TrainerProximityFeature(
@@ -410,6 +422,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
             server=server,
             osc=osc,
             names=trainer_settings.get("names") or [],
+            config_provider=get_assigned_pet_configs,
             logger=logs.get_logger("trainer_proximity_feature.log"),
         ),
         TrainerTricksFeature(
@@ -417,6 +430,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
             server=server,
             osc=osc,
             names=trainer_settings.get("names") or [],
+            config_provider=get_assigned_pet_configs,
             logger=logs.get_logger("trainer_tricks_feature.log"),
         ),
         TrainerScoldingFeature(
@@ -424,6 +438,7 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
             server=server,
             osc=osc,
             scolding_words=trainer_settings.get("scolding_words") or [],
+            config_provider=get_assigned_pet_configs,
             logger=logs.get_logger("trainer_scolding_feature.log"),
         ),
     ]
@@ -459,6 +474,7 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
     pishock = PiShockInterface(
         username=pet_settings.get("pishock_username") or "",
         api_key=pet_settings.get("pishock_api_key") or "",
+        share_code=pet_settings.get("pishock_share_code") or "",
         role="pet",
     )
 
@@ -471,8 +487,26 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
     server = _ensure_server(role="pet")
 
     features: List[Any] = [
-        PullFeature(osc=osc, pishock=pishock, whisper=whisper, server=server, logger=logs.get_logger("pull_feature.log")),
-        WordFeature(osc=osc, pishock=pishock, whisper=whisper, server=server, logger=logs.get_logger("pronouns_feature.log")),
+        PullFeature(
+            osc=osc,
+            pishock=pishock,
+            server=server,
+            logger=logs.get_logger("pull_feature.log")
+        ),
+        ForbiddenWordsFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            server=server,
+            logger=logs.get_logger("forbidden_words_feature.log"),
+        ),
+        WordFeature(
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            server=server,
+            logger=logs.get_logger("wordgame_feature.log")
+        ),
         FocusFeature(
             osc=osc,
             pishock=pishock,
