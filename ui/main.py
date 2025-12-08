@@ -10,7 +10,7 @@ from .logs import EventLogPanel, WhisperLogPanel
 from .trainer import TrainerTab
 from .pet import PetTab
 from .stats import StatsTab
-from .server import ServerTab
+from .session import SessionTab
 from .status import ConnectionStatusPanel, format_osc_status, format_pishock_status
 
 
@@ -54,7 +54,7 @@ def build_ui(root: tk.Tk) -> None:
         trainer_profile.update_profile_from_settings(config, settings)
         save_config(config)
         services.notify_profile_updated(settings)
-        server_tab.set_profile_options(trainer_profile.list_profile_names(config))
+        session_tab.set_profile_options(trainer_profile.list_profile_names(config))
         if services.is_trainer_running():
             services.update_trainer_feature_states(settings)
         # Mirror trainer-controlled pet feature toggles into the pet tab and running pet runtime.
@@ -114,19 +114,19 @@ def build_ui(root: tk.Tk) -> None:
             feature_pronouns=current.get("feature_pronouns", False),
         )
         save_config(config)
-        server_tab.set_profile_options(trainer_profile.list_profile_names(config))
+        session_tab.set_profile_options(trainer_profile.list_profile_names(config))
 
     def on_trainer_profile_renamed(old_name: str, new_name: str) -> None:
         if trainer_profile.rename_profile(config, old_name, new_name):
             save_config(config)
             services.rename_profile_assignment(old_name, new_name)
-            server_tab.set_profile_options(trainer_profile.list_profile_names(config))
+            session_tab.set_profile_options(trainer_profile.list_profile_names(config))
 
     def on_trainer_profile_deleted(profile_name: str) -> None:
         if trainer_profile.delete_profile(config, profile_name):
             save_config(config)
             services.remove_profile_assignments(profile_name)
-            server_tab.set_profile_options(trainer_profile.list_profile_names(config))
+            session_tab.set_profile_options(trainer_profile.list_profile_names(config))
 
     trainer_tab = TrainerTab(
         notebook,
@@ -188,7 +188,7 @@ def build_ui(root: tk.Tk) -> None:
         feature_pronouns=current_trainer_settings.get("feature_pronouns", False),
     )
 
-    # Runtime orchestration now lives alongside server joins.
+    # Runtime orchestration now lives alongside session joins.
     def _compose_pet_runtime_settings() -> dict:
         pet_settings = pet_tab.collect_settings()
         trainer_settings = trainer_tab.collect_settings()
@@ -269,7 +269,7 @@ def build_ui(root: tk.Tk) -> None:
             return
         services.assign_profile_to_pet(pet_client_id, profile_name, settings)
 
-    server_tab = ServerTab(
+    session_tab = SessionTab(
         notebook,
         runtime_status_provider=runtime_status_provider,
         on_join_trainer=_start_trainer_runtime,
@@ -277,26 +277,26 @@ def build_ui(root: tk.Tk) -> None:
         on_leave_session=_stop_all_runtimes,
         on_pet_profile_selected=on_pet_profile_selected,
     )
-    server_tab.set_profile_options(trainer_profile.list_profile_names(config))
+    session_tab.set_profile_options(trainer_profile.list_profile_names(config))
 
-    # Persist server username across runs.
-    server_config = config.setdefault("server", {})
-    stored_username = server_config.get("username") or ""
+    # Persist session username across runs.
+    session_config = config.setdefault("session", {})
+    stored_username = session_config.get("username") or ""
     if stored_username:
-        server_tab.username_entry.variable.set(stored_username)
+        session_tab.username_entry.variable.set(stored_username)
         services.set_server_username(stored_username)
 
     def _on_server_username_changed(*_) -> None:
-        username = server_tab.username_entry.variable.get().strip()
-        server_config["username"] = username or None
+        username = session_tab.username_entry.variable.get().strip()
+        session_config["username"] = username or None
         save_config(config)
         services.set_server_username(username or None)
 
-    server_tab.username_entry.variable.trace_add("write", _on_server_username_changed)
+    session_tab.username_entry.variable.trace_add("write", _on_server_username_changed)
 
     notebook.add(trainer_tab, text="trainer")
     notebook.add(pet_tab, text="pet")
-    notebook.add(server_tab, text="session")
+    notebook.add(session_tab, text="session")
     notebook.add(stats_tab, text="stats")
 
     notebook.grid(row=0, column=0, sticky="nsew")

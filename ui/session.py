@@ -8,7 +8,7 @@ from logic import services
 from .shared import LabeledEntry, ScrollableFrame
 
 
-class ServerTab(ScrollableFrame):
+class SessionTab(ScrollableFrame):
     """Tab that surfaces basic server session controls."""
 
     def __init__(
@@ -44,6 +44,9 @@ class ServerTab(ScrollableFrame):
         self._last_assignments: dict[str, str] = {}
         self._last_participants: list[dict] = []
         self._last_stats_by_user: dict = {}
+        self._roster_header_rendered = False
+        self._roster_rows: dict[str, dict] = {}
+        self._roster_empty_label: ttk.Label | None = None
 
         # Before-join layout ------------------------------------------
         setup = ttk.LabelFrame(self.container, text="Session setup")
@@ -277,24 +280,32 @@ class ServerTab(ScrollableFrame):
     ) -> None:
         """Build the session roster table with live status + profile selectors."""
 
-        for child in self.roster_table.winfo_children():
-            child.destroy()
-
-        headers = ["User", "Role", "VRChat OSC", "PiShock", "Whisper", "Profile"]
-        for col, header in enumerate(headers):
-            ttk.Label(self.roster_table, text=header, font=("TkDefaultFont", 9, "bold")).grid(
-                row=0, column=col, sticky="w", padx=(0, 6), pady=(0, 4)
-            )
-
-        if not participants:
-            ttk.Label(self.roster_table, text="No users in session").grid(row=1, column=0, sticky="w", pady=(2, 0))
-            return
-
+        participants = participants or []
         role_lower = (local_role or "").lower()
         assignments = self._last_assignments or {}
-        pet_vars: dict[str, tk.StringVar] = {}
 
-        for row, user in enumerate(participants, start=1):
+        # Render table header once.
+        if not self._roster_header_rendered:
+            headers = ["User", "Role", "VRChat OSC", "PiShock", "Whisper", "Profile"]
+            for col, header in enumerate(headers):
+                ttk.Label(self.roster_table, text=header, font=("TkDefaultFont", 9, "bold")).grid(
+                    row=0, column=col, sticky="w", padx=(0, 6), pady=(0, 4)
+                )
+            self._roster_header_rendered = True
+
+        # Empty state handling.
+        if not participants:
+            self._destroy_roster_rows()
+            if self._roster_empty_label is None:
+                self._roster_empty_label = ttk.Label(self.roster_table, text="No users in session")
+                self._roster_empty_label.grid(row=1, column=0, sticky="w", pady=(2, 0))
+            return
+        if self._roster_empty_label is not None:
+            self._roster_empty_label.destroy()
+            self._roster_empty_label = None
+
+        desired_keys: list[str] = []
+        for row_index, user in enumerate(participants, start=1):
             username = user.get("label") or user.get("username") or "-"
             role_raw = (user.get("role") or "").lower()
             role = "trainer" if role_raw == "leader" else "pet" if role_raw == "follower" else (role_raw or "-")
@@ -323,40 +334,145 @@ class ServerTab(ScrollableFrame):
             pishock_status = status_overrides.get("pishock") or user_status.get("pishock") or latest_status.get("pishock") or "-"
             whisper_status = status_overrides.get("whisper") or user_status.get("whisper") or latest_status.get("whisper") or "-"
 
-            ttk.Label(self.roster_table, text=username).grid(row=row, column=0, sticky="w", padx=(0, 6), pady=2)
-            ttk.Label(self.roster_table, text=role.title()).grid(row=row, column=1, sticky="w", padx=(0, 6))
-            ttk.Label(self.roster_table, text=osc_status).grid(row=row, column=2, sticky="w", padx=(0, 6))
-            ttk.Label(self.roster_table, text=pishock_status).grid(row=row, column=3, sticky="w", padx=(0, 6))
-            ttk.Label(self.roster_table, text=whisper_status).grid(row=row, column=4, sticky="w", padx=(0, 6))
+            key = str(user.get("client_uuid") or username or row_index)
+            desired_keys.append(key)
+            existing = self._roster_rows.get(key)
+            is_pet_row = role_lower == "trainer" and role == "pet"
 
-            # Profile selection only shown to trainers for pet rows.
-            if role_lower == "trainer" and role == "pet":
-                pet_id = str(user.get("client_uuid") or "")
-                current_assignment = assignments.get(pet_id) or "(no profile)"
-                var = tk.StringVar(value=current_assignment)
-                combo = ttk.Combobox(
-                    self.roster_table,
-                    textvariable=var,
-                    values=self._profile_options,
-                    state="readonly",
-                    width=18,
-                )
-                combo.grid(row=row, column=5, sticky="ew", padx=(0, 6))
-                combo.bind(
-                    "<<ComboboxSelected>>",
-                    lambda _evt, pid=pet_id, v=var: self._on_pet_profile_change(pid, v.get()),
-                )
+            row_payload = {
+                "username": username,
+                "role": role,
+                "osc": osc_status,
+                "pishock": pishock_status,
+                "whisper": whisper_status,
+                "assignment": assignments.get(str(user.get("client_uuid") or "")) or "(no profile)",
+                "is_pet_row": is_pet_row,
+            }
 
-                if var.get() not in self._profile_options:
-                    var.set("(no profile)")
-                    self._on_pet_profile_change(pet_id, "(no profile)")
-
-                pet_vars[pet_id] = var
+            if existing is None or existing.get("is_pet_row") != is_pet_row:
+                self._destroy_roster_row(key)
+                self._create_roster_row(key, row_index, row_payload)
             else:
-                profile_text = "Not used" if role == "trainer" else assignments.get(str(user.get("client_uuid") or "")) or "-"
-                ttk.Label(self.roster_table, text=profile_text).grid(row=row, column=5, sticky="w", padx=(0, 6))
+                self._update_roster_row(key, row_index, row_payload)
 
-        self._pet_profile_vars = pet_vars
+        # Destroy rows no longer present.
+        for key in list(self._roster_rows.keys()):
+            if key not in desired_keys:
+                self._destroy_roster_row(key)
+
+    def _create_roster_row(self, key: str, row_index: int, payload: dict) -> None:
+        """Build a roster row for a user and store its widgets."""
+
+        widgets: dict[str, tk.Widget] = {}
+
+        widgets["username"] = ttk.Label(self.roster_table, text=payload["username"])
+        widgets["username"].grid(row=row_index, column=0, sticky="w", padx=(0, 6), pady=2)
+
+        widgets["role"] = ttk.Label(self.roster_table, text=payload["role"].title())
+        widgets["role"].grid(row=row_index, column=1, sticky="w", padx=(0, 6))
+
+        widgets["osc"] = ttk.Label(self.roster_table, text=payload["osc"])
+        widgets["osc"].grid(row=row_index, column=2, sticky="w", padx=(0, 6))
+
+        widgets["pishock"] = ttk.Label(self.roster_table, text=payload["pishock"])
+        widgets["pishock"].grid(row=row_index, column=3, sticky="w", padx=(0, 6))
+
+        widgets["whisper"] = ttk.Label(self.roster_table, text=payload["whisper"])
+        widgets["whisper"].grid(row=row_index, column=4, sticky="w", padx=(0, 6))
+
+        profile_widget: tk.Widget
+        profile_var: tk.StringVar | None = None
+        if payload["is_pet_row"]:
+            profile_var = tk.StringVar(value=payload["assignment"])
+            profile_widget = ttk.Combobox(
+                self.roster_table,
+                textvariable=profile_var,
+                values=self._profile_options,
+                state="readonly",
+                width=18,
+            )
+            profile_widget.grid(row=row_index, column=5, sticky="ew", padx=(0, 6))
+            profile_widget.bind(
+                "<<ComboboxSelected>>",
+                lambda _evt, pid=key, v=profile_var: self._on_pet_profile_change(pid, v.get()),
+            )
+            if profile_var.get() not in self._profile_options:
+                profile_var.set("(no profile)")
+                self._on_pet_profile_change(key, "(no profile)")
+            self._pet_profile_vars[key] = profile_var
+        else:
+            profile_text = "Not used" if payload["role"] == "trainer" else payload["assignment"] or "-"
+            profile_widget = ttk.Label(self.roster_table, text=profile_text)
+            profile_widget.grid(row=row_index, column=5, sticky="w", padx=(0, 6))
+
+        self._roster_rows[key] = {
+            "widgets": widgets,
+            "profile_widget": profile_widget,
+            "profile_var": profile_var,
+            "is_pet_row": payload["is_pet_row"],
+        }
+
+    def _update_roster_row(self, key: str, row_index: int, payload: dict) -> None:
+        """Update an existing roster row without tearing down focused widgets."""
+
+        row = self._roster_rows.get(key)
+        if row is None:
+            self._create_roster_row(key, row_index, payload)
+            return
+
+        widgets = row["widgets"]
+        # Update text fields only if they changed to avoid churn.
+        if widgets["username"].cget("text") != payload["username"]:
+            widgets["username"].configure(text=payload["username"])
+        if widgets["role"].cget("text").lower() != payload["role"]:
+            widgets["role"].configure(text=payload["role"].title())
+        if widgets["osc"].cget("text") != payload["osc"]:
+            widgets["osc"].configure(text=payload["osc"])
+        if widgets["pishock"].cget("text") != payload["pishock"]:
+            widgets["pishock"].configure(text=payload["pishock"])
+        if widgets["whisper"].cget("text") != payload["whisper"]:
+            widgets["whisper"].configure(text=payload["whisper"])
+
+        # Keep row ordering in sync with participant ordering.
+        for widget in widgets.values():
+            widget.grid_configure(row=row_index)
+
+        profile_widget = row["profile_widget"]
+        if row["is_pet_row"]:
+            var = row["profile_var"]
+            desired_assignment = payload["assignment"]
+            if desired_assignment not in self._profile_options:
+                desired_assignment = "(no profile)"
+            if var is not None and var.get() != desired_assignment:
+                # Preserve selection while keeping assignment in sync.
+                var.set(desired_assignment)
+                if desired_assignment == "(no profile)" and payload["assignment"] != "(no profile)":
+                    self._on_pet_profile_change(key, "(no profile)")
+            if tuple(profile_widget.cget("values")) != tuple(self._profile_options):
+                profile_widget.configure(values=self._profile_options)
+            profile_widget.grid_configure(row=row_index)
+        else:
+            desired_text = "Not used" if payload["role"] == "trainer" else payload["assignment"] or "-"
+            if profile_widget.cget("text") != desired_text:
+                profile_widget.configure(text=desired_text)
+            profile_widget.grid_configure(row=row_index)
+
+    def _destroy_roster_rows(self) -> None:
+        """Remove all roster rows (not the header)."""
+        for key in list(self._roster_rows.keys()):
+            self._destroy_roster_row(key)
+
+    def _destroy_roster_row(self, key: str) -> None:
+        """Destroy widgets for a single roster row."""
+        row = self._roster_rows.pop(key, None)
+        if row is None:
+            return
+        for widget in row["widgets"].values():
+            widget.destroy()
+        if row["profile_widget"] is not None:
+            row["profile_widget"].destroy()
+        if key in self._pet_profile_vars:
+            self._pet_profile_vars.pop(key, None)
 
     def _on_pet_profile_change(self, pet_id: str, selection: str) -> None:
         profile_name = selection if selection and selection != "(no profile)" else None
