@@ -562,6 +562,16 @@ def update_trainer_feature_states(trainer_settings: dict) -> None:
     if runtime is None:
         return
 
+    # Push difficulty scaling to any features that support live updates.
+    _apply_feature_scaling(runtime.features, _extract_scaling(trainer_settings))
+
+    # Refresh scolding words for the running trainer scolding feature.
+    scolding_words = trainer_settings.get("scolding_words")
+    for feature in runtime.features:
+        if isinstance(feature, TrainerScoldingFeature):
+            feature.set_scolding_words(scolding_words)
+            break
+
     _apply_feature_flags(
         runtime.features,
         {

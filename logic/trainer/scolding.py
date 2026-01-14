@@ -31,7 +31,7 @@ class TrainerScoldingFeature:
 
         self._whisper_tag = "trainer_scolding_feature"
         self._config_provider = config_provider
-        self._scolding_phrases = [self._normalise(word) for word in (scolding_words or []) if self._normalise(word)]
+        self._scolding_phrases = self._normalise_list(scolding_words)
         self._poll_interval = 0.2
 
         self._thread: threading.Thread | None = None
@@ -101,6 +101,15 @@ class TrainerScoldingFeature:
             if self._stop_event.wait(self._poll_interval):
                 break
 
+    def set_scolding_words(self, scolding_words: list[str] | None) -> None:
+        """Update the scolding word list while running."""
+        self._scolding_phrases = self._normalise_list(scolding_words)
+        # Reset transcript so new phrases only match fresh speech.
+        try:
+            self.whisper.reset_tag(self._whisper_tag)
+        except Exception:
+            pass
+
     def _maybe_send_scold(self, text: str) -> None:
         normalised = self._normalise(text)
         if not normalised:
@@ -147,7 +156,7 @@ class TrainerScoldingFeature:
         except Exception:
             raw = []
 
-        return [self._normalise(word) for word in raw if self._normalise(word)]
+        return self._normalise_list(raw)
 
     @staticmethod
     def _normalise(text: str) -> str:
@@ -164,6 +173,9 @@ class TrainerScoldingFeature:
                 chars.append(" ")
 
         return " ".join("".join(chars).split())
+
+    def _normalise_list(self, words: list[str] | None) -> list[str]:
+        return [self._normalise(word) for word in (words or []) if self._normalise(word)]
 
     def _log(self, message: str) -> None:
         logger = self._logger
