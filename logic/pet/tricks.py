@@ -67,6 +67,7 @@ class TricksFeature:
             "beg": ["beg"],
             "play_dead": ["play dead", "playdead", "played dead"],
             "roll_over": ["rollover", "roll over"],
+            "present": ["present", "bend over", "ass up"],
         }
 
         self._log("event=init feature=tricks runtime=pet")
@@ -228,6 +229,14 @@ class TricksFeature:
                    and not self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
                    and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
                    and self.osc.get_bool_param("Trainer/HeadFloor", default=False)
+        elif command == "present":
+            return self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
+                   and self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
+                   and self.osc.get_bool_param("Trainer/HeadFloor", default=False)
+
 
         return False
 
@@ -244,7 +253,7 @@ class TricksFeature:
     def _deliver_task_start_signal(self) -> None:
         try:
             self.pishock.send_vibrate(strength=10, duration=0.2)
-            self._log("event=shock feature=tricks runtime=pet reason=task_start strength=1")
+            self._log("event=vibrate feature=tricks runtime=pet reason=task_start strength=1")
         except Exception:
             return
 
@@ -252,7 +261,7 @@ class TricksFeature:
         try:
             for pulse in (1, 2):
                 self.pishock.send_vibrate(strength=10, duration=0.2)
-                self._log(f"event=shock feature=tricks runtime=pet reason=task_complete pulse={pulse} strength=1")
+                self._log(f"event=vibrate feature=tricks runtime=pet reason=task_complete pulse={pulse} strength=1")
                 if pulse == 1:
                     time.sleep(0.2)
         except Exception:
