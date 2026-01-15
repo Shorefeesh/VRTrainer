@@ -16,6 +16,7 @@ from logic.pet.forbidden import ForbiddenWordsFeature
 from logic.pet.wordgame import WordFeature
 from logic.pet.proximity import ProximityFeature
 from logic.pet.pull import PullFeature
+from logic.pet.depth import DepthFeature
 from logic.pet.scolding import ScoldingFeature
 from logic.pet.tricks import TricksFeature
 from logic.trainer.focus import TrainerFocusFeature
@@ -492,6 +493,12 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
             pishock=pishock,
             server=server,
             logger=logs.get_logger("pull_feature.log")
+        ),
+        DepthFeature(
+            osc=osc,
+            pishock=pishock,
+            server=server,
+            logger=logs.get_logger("depth_feature.log")
         ),
         ForbiddenWordsFeature(
             osc=osc,

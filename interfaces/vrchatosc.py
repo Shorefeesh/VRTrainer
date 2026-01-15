@@ -40,17 +40,25 @@ class VRChatOSCInterface:
         }
         self._expected_pet_params: set[str] = {
             "Trainer/Proximity",
+            "Trainer/ProximityHead",
             "Trainer/EyeLeft",
             "Trainer/EyeFarLeft",
             "Trainer/EyeRight",
             "Trainer/EyeFarRight",
             "Trainer/Paw",
-            "Trainer/HipsFloor",
-            "Trainer/HeadFloor",
-            "Trainer/HandFloorLeft",
-            "Trainer/HandFloorRight",
-            "Trainer/FootFloorLeft",
-            "Trainer/FootFloorRight",
+            "Trainer/HipsFloorMin",
+            "Trainer/HipsFloorMax",
+            "Trainer/HeadFloorMin",
+            "Trainer/HeadFloorMax",
+            "Trainer/HandFloorLeftMin",
+            "Trainer/HandFloorLeftMax",
+            "Trainer/HandFloorRightMin",
+            "Trainer/HandFloorRightMax",
+            "Trainer/FootFloorLeftMin",
+            "Trainer/FootFloorLeftMax",
+            "Trainer/FootFloorRightMin",
+            "Trainer/FootFloorRightMax",
+            "Trainer/PenDepth",
             "LeftEar_IsGrabbed",
             "LeftEar_Stretch",
             "RightEar_IsGrabbed",
@@ -228,9 +236,6 @@ class VRChatOSCInterface:
             expected_trainer = set(self._expected_trainer_params)
             seen_trainer = set(self._trainer_params_seen)
 
-            # Pet ear/tail pull parameters are tracked via the generic
-            # parameter store; treat known pull params as "expected" and
-            # mark whichever have been observed so far as "found".
             expected_pet = set(self._expected_pet_params)
             seen_pet = {name for name in self._param_values.keys() if name in expected_pet}
 

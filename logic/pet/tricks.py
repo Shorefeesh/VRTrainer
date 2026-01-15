@@ -188,54 +188,54 @@ class TricksFeature:
 
     def _is_command_completed(self, command: str) -> bool:
         if command == "paw":
-            return (self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
-                   ^ self.osc.get_bool_param("Trainer/HandFloorRight", default=False)) \
-                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
-                   and not self.osc.get_bool_param("Trainer/HeadFloor", default=False)
+            return (not self.osc.get_bool_param("Trainer/HandFloorLeftMin", default=False) \
+                   or not self.osc.get_bool_param("Trainer/HandFloorRightMin", default=False)) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeftMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRightMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloorMax", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HeadFloorMin", default=False)
         elif command == "sit":
-            return self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
-                   and self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
-                   and not self.osc.get_bool_param("Trainer/HeadFloor", default=False)
+            return self.osc.get_bool_param("Trainer/HandFloorLeftMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HandFloorRightMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeftMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRightMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloorMax", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HeadFloorMin", default=False)
         elif command == "lay_down":
-            return self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
-                   and self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HeadFloor", default=False)
+            return self.osc.get_bool_param("Trainer/HandFloorLeftMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HandFloorRightMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeftMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRightMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloorMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HeadFloorMax", default=False)
         elif command == "beg":
-            return not self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
-                   and not self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
-                   and not self.osc.get_bool_param("Trainer/HeadFloor", default=False)
+            return not self.osc.get_bool_param("Trainer/HandFloorLeftMin", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HandFloorRightMin", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeftMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRightMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloorMax", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HeadFloorMin", default=False)
         elif command == "play_dead":
-            return not self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
-                   and not self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
-                   and not self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
-                   and not self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HeadFloor", default=False)
+            return not self.osc.get_bool_param("Trainer/HandFloorLeftMin", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HandFloorRightMin", default=False) \
+                   and not self.osc.get_bool_param("Trainer/FootFloorLeftMin", default=False) \
+                   and not self.osc.get_bool_param("Trainer/FootFloorRightMin", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloorMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HeadFloorMax", default=False)
         elif command == "roll_over":
-            return not self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
-                   and not self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
-                   and not self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
-                   and not self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HeadFloor", default=False)
+            return not self.osc.get_bool_param("Trainer/HandFloorLeftMin", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HandFloorRightMin", default=False) \
+                   and not self.osc.get_bool_param("Trainer/FootFloorLeftMin", default=False) \
+                   and not self.osc.get_bool_param("Trainer/FootFloorRightMin", default=False) \
+                   and self.osc.get_bool_param("Trainer/HipsFloorMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HeadFloorMax", default=False)
         elif command == "present":
-            return self.osc.get_bool_param("Trainer/HandFloorLeft", default=False) \
-                   and self.osc.get_bool_param("Trainer/HandFloorRight", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootFloorLeft", default=False) \
-                   and self.osc.get_bool_param("Trainer/FootFloorRight", default=False) \
-                   and not self.osc.get_bool_param("Trainer/HipsFloor", default=False) \
-                   and self.osc.get_bool_param("Trainer/HeadFloor", default=False)
+            return self.osc.get_bool_param("Trainer/HandFloorLeftMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/HandFloorRightMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorLeftMax", default=False) \
+                   and self.osc.get_bool_param("Trainer/FootFloorRightMax", default=False) \
+                   and not self.osc.get_bool_param("Trainer/HipsFloorMin", default=False) \
+                   and self.osc.get_bool_param("Trainer/HeadFloorMax", default=False)
 
 
         return False

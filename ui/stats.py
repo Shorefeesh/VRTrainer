@@ -19,6 +19,7 @@ _LOG_FILES: Dict[str, str] = {
     "tricks": "tricks_feature.log",
     "scolding": "scolding_feature.log",
     "pull": "pull_feature.log",
+    "depth": "depth_feature.log",
     "pronouns": "pronouns_feature.log",
 }
 

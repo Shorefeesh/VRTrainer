@@ -290,8 +290,8 @@ class WhisperInterface:
         # turn limits how much buffered audio builds up.
         block_duration = 3.0  # seconds per transcription window
 
-        
-        
+
+
         # Resolve device: ``None`` lets sounddevice pick the default.
         try:
             if self.input_device:

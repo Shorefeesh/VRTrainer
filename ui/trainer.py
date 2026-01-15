@@ -188,6 +188,9 @@ class TrainerTab(ScrollableFrame):
         self.feature_ear_tail = LabeledCheckbutton(frame, "Ear/Tail pull")
         self.feature_ear_tail.grid(row=0, column=1, sticky="w")
 
+        self.feature_depth = LabeledCheckbutton(frame, "Depth")
+        self.feature_depth.grid(row=1, column=1, sticky="w")
+
         for feature in (
             self.feature_focus,
             self.feature_proximity,
@@ -195,6 +198,7 @@ class TrainerTab(ScrollableFrame):
             self.feature_scolding,
             self.feature_forbidden_words,
             self.feature_ear_tail,
+            self.feature_depth,
         ):
             feature.variable.trace_add("write", self._on_any_setting_changed)
 
@@ -300,6 +304,7 @@ class TrainerTab(ScrollableFrame):
             "feature_scolding": self.feature_scolding.variable.get(),
             "feature_forbidden_words": self.feature_forbidden_words.variable.get(),
             "feature_ear_tail": self.feature_ear_tail.variable.get(),
+            "feature_depth": self.feature_depth.variable.get(),
             "word_game": self.word_game_var.get() or self._word_game_options[0],
             # Keep compatibility with the existing pronouns feature by deriving it from the word game choice.
             "feature_pronouns": (self.word_game_var.get() or "").lower() == "pronouns",
@@ -324,6 +329,7 @@ class TrainerTab(ScrollableFrame):
                 self.feature_scolding.variable.set(False)
                 self.feature_forbidden_words.variable.set(False)
                 self.feature_ear_tail.variable.set(False)
+                self.feature_depth.variable.set(False)
                 self.word_game_var.set(self._word_game_options[0])
                 self.delay_scale.variable.set(1.0)
                 self.cooldown_scale.variable.set(1.0)
@@ -344,6 +350,7 @@ class TrainerTab(ScrollableFrame):
                 self.feature_scolding.variable.set(bool(settings.get("feature_scolding")))
                 self.feature_forbidden_words.variable.set(bool(settings.get("feature_forbidden_words")))
                 self.feature_ear_tail.variable.set(bool(settings.get("feature_ear_tail")))
+                self.feature_depth.variable.set(bool(settings.get("feature_depth")))
 
                 word_game = settings.get("word_game") or (
                     self._word_game_options[1] if settings.get("feature_pronouns") else self._word_game_options[0]
