@@ -60,22 +60,6 @@ class WordFeature:
         }
         self._active_game: str | None = None
 
-        # Disallowed first-person pronoun tokens. Tokens are compared
-        # in a case-insensitive, punctuation-stripped fashion.
-        self._disallowed_tokens: Set[str] = {
-            "i",
-            "im",
-            "i'm",
-            "ive",
-            "i've",
-            "ill",
-            "i'll",
-            "me",
-            "my",
-            "mine",
-            "myself",
-        }
-
         self._log(
             "event=init feature=word_game supported_games="
             + ",".join(sorted(self._game_handlers.keys()))
@@ -92,8 +76,6 @@ class WordFeature:
         try:
             self.whisper.reset_tag(self._whisper_tag)
         except Exception:
-            # If Whisper is not fully initialised, continue anyway; the
-            # worker loop will simply see empty text.
             pass
 
         thread = threading.Thread(
@@ -198,34 +180,34 @@ class WordFeature:
         if not text:
             return False
 
+        disallowed_tokens: Set[str] = {
+            "i",
+            "i'm",
+            "i've",
+            "i'll",
+            "me",
+            "my",
+            "mine",
+            "myself",
+        }
+
         for raw_token in text.split():
-            # Strip common punctuation while keeping letters and
-            # apostrophes so "I'm" and "I'll" can be matched.
             cleaned = "".join(ch for ch in raw_token if ch.isalpha() or ch in ("'", "’")).lower()
             if not cleaned:
                 continue
 
-            # Check both with and without apostrophes to cover variants
-            # like "I'm" vs "Im".
-            if cleaned in self._disallowed_tokens:
+            if cleaned.replace("’", "'") in disallowed_tokens:
                 return True
 
-            no_apostrophe = cleaned.replace("'", "").replace("’", "")
-            if no_apostrophe and no_apostrophe in self._disallowed_tokens:
-                return True
 
         return False
 
     def _deliver_correction(self, game: str = "word_game") -> None:
         """Trigger a corrective shock via PiShock."""
         try:
-            # Use a modest default intensity and short pulse so that
-            # this feature is usable out of the box without further
-            # tuning. Values can be adjusted later or made configurable.
             self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
             self._log(f"event=shock feature={game} strength={self._shock_strength}")
         except Exception:
-            # Never let PiShock errors break the feature loop.
             return
 
     def _log(self, message: str) -> None:
