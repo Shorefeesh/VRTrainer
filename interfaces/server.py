@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Callable, MutableMapping, Optional, List, Iterable
+from typing import Any, Callable, MutableMapping, Optional, Iterable
 import time
 from collections import deque
 import uuid
@@ -146,10 +146,10 @@ class RemoteServerInterface:
             }
         )
 
-    def send_command(self, phrase: str, metadata: MutableMapping[str, Any] | None = None) -> None:
+    def send_command(self, command: str, metadata: MutableMapping[str, Any] | None = None) -> None:
         """Send any trainer-issued instruction (tricks, scold, focus, proximity, etc.)."""
         meta = dict(metadata or {})
-        payload = {"phrase": phrase, "meta": meta, "type": "command"}
+        payload = {"command": command, "meta": meta}
         self._send_ws(
             {
                 "type": "command",
@@ -411,7 +411,7 @@ class RemoteServerInterface:
         if evt_type == "logs":
             return ""
 
-        phrase = payload.get("phrase")
+        phrase = payload.get("command")
         if evt_type == "command" and phrase:
             return f"{evt.get('from_client', '-')[:8]} command: {phrase}"
         if evt_type == "config":
@@ -553,13 +553,6 @@ class RemoteServerInterface:
         self._feature_queues.clear()
 
     # Event routing --------------------------------------------------
-    _FEATURE_FLAG_KEYS = {
-        "focus": "feature_focus",
-        "proximity": "feature_proximity",
-        "tricks": "feature_tricks",
-        "scolding": "feature_scolding",
-    }
-
     def _route_incoming_event(self, event: dict[str, Any]) -> None:
         """Fan out server events to per-feature queues and drop disabled ones."""
 
@@ -585,14 +578,10 @@ class RemoteServerInterface:
         self._record_event(event)
 
     def _is_feature_enabled(self, feature: str, trainer_id: str | None) -> bool:
-        flag_key = self._FEATURE_FLAG_KEYS.get(feature)
-        if not flag_key:
-            return True
-
         if trainer_id and trainer_id in self._latest_settings_by_trainer:
-            return bool(self._latest_settings_by_trainer[trainer_id].get(flag_key))
+            return bool(self._latest_settings_by_trainer[trainer_id].get(feature))
 
-        return bool(self._latest_settings.get(flag_key))
+        return bool(self._latest_settings.get(feature))
 
     def poll_feature_events(self, feature: str, limit: int = 10, *, trainer_id: str | None = None) -> list[dict[str, Any]]:
         """Return up to ``limit`` events for a specific feature.

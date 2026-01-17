@@ -130,7 +130,7 @@ class WhisperInterface:
 
                 backend_label = self._format_backend_label(device, compute_type)
 
-                _SHARED_WHISPER_MODEL = WhisperModel("medium", **kwargs)
+                _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
                 _SHARED_WHISPER_BACKEND = backend_label
 
             elif _SHARED_WHISPER_BACKEND is None:
@@ -283,30 +283,17 @@ class WhisperInterface:
         sd = self._sd
         model = self._whisper_model
 
-        # Basic audio parameters. These can be tuned later if needed.
         samplerate = 16000
-        # Shorter windows reduce end-to-end latency and how long the
-        # worker spends inside a single transcription call, which in
-        # turn limits how much buffered audio builds up.
         block_duration = 3.0  # seconds per transcription window
 
-
-
-        # Resolve device: ``None`` lets sounddevice pick the default.
-        try:
-            if self.input_device:
-                # sounddevice can accept device names directly; fall back
-                # to default if the name is not recognised.
-                all_devices = sd.query_devices()
-                selected_devices = [device for device in all_devices if device['name'] == self.input_device]
-                if selected_devices:
-                    # TODO: Select the first one. Fix later, lol smiley face
-                    device_index = selected_devices[0]['index']
-                else:
-                    device_index = None
-        except Exception as e:
-            logging.error(e)
-            device = None
+        all_devices = sd.query_devices()
+        selected_devices = [device for device in all_devices if device['name'] == self.input_device]
+        if selected_devices:
+            # TODO: Select the first one.
+            device_index = selected_devices[0]['index']
+        else:
+            msg = "Couldn't find selected audio device"
+            raise RuntimeError(msg)
 
         try:  # pragma: no cover - environment/hardware specific
             with sd.InputStream(
@@ -399,7 +386,7 @@ class WhisperInterface:
 
                     with self._lock:
                         self._transcript.append(_TranscriptChunk(text=text))
-        except Exception as e:
+        except Exception:
             logging.exception("Unexpected exception occurred")
             # If audio capture fails (no device, permission issue, etc.),
             # just exit the worker loop; the interface will stay alive

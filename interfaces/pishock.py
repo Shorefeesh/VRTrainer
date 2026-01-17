@@ -153,11 +153,6 @@ class PiShockInterface:
         if not self._enabled:
             return
 
-        # Always emit an OSC parameter so the avatars can react visually
-        # to shocks, even if the PiShock API itself is not configured
-        # or connected.
-        self._send_shock_osc(strength=strength, duration=duration)
-
         if not self._connected:
             return
 

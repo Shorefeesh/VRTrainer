@@ -3,23 +3,17 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, List
 
+from logic.feature import feature_list
 
 TRAINER_SETTINGS_KEYS = [
     "profile",
-    "feature_focus",
-    "feature_proximity",
-    "feature_tricks",
-    "feature_scolding",
-    "feature_forbidden_words",
-    "feature_ear_tail",
-    "feature_depth",
+    *feature_list(),
     "word_game",
     "delay_scale",
     "cooldown_scale",
     "duration_scale",
     "strength_scale",
     "names",
-    "command_words",
     "scolding_words",
     "forbidden_words",
 ]
@@ -53,25 +47,19 @@ def set_active_profile_name(config: Dict[str, Any], name: str | None) -> None:
 
 def default_profile_settings(profile_name: str) -> Dict[str, Any]:
     """Default settings for a new trainer profile."""
-    return {
+    defaults = {
         "profile": profile_name,
-        "feature_focus": False,
-        "feature_proximity": False,
-        "feature_tricks": False,
-        "feature_scolding": False,
-        "feature_forbidden_words": False,
-        "feature_ear_tail": False,
-        "feature_depth": False,
+        **{feature: False for feature in feature_list()},
         "word_game": "None",
         "delay_scale": 1.0,
         "cooldown_scale": 1.0,
         "duration_scale": 1.0,
         "strength_scale": 1.0,
         "names": [],
-        "command_words": [],
         "scolding_words": [],
         "forbidden_words": [],
     }
+    return defaults
 
 
 def get_profile(config: Dict[str, Any], name: str) -> Dict[str, Any] | None:

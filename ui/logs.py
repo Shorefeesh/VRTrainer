@@ -108,10 +108,10 @@ class WhisperLogPanel(ttk.LabelFrame):
                 self._reset_log(role)
 
             new_text = ""
-            if role == "trainer" and services.is_trainer_running():
-                new_text = services.get_trainer_whisper_log_text()
-            elif role == "pet" and services.is_pet_running():
-                new_text = services.get_pet_whisper_log_text()
+            if role == "trainer" and services.is_running():
+                new_text = services.get_whisper_log_text()
+            elif role == "pet" and services.is_running():
+                new_text = services.get_whisper_log_text()
 
             if new_text:
                 self._append_text(new_text)

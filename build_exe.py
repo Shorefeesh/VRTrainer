@@ -35,7 +35,7 @@ def main() -> None:
         "--clean",
         "--onefile",  # single bundled executable
         "--windowed",  # hide console on Windows; no effect on Linux
-        f"--name=VRTrainer",
+        "--name=VRTrainer",
         *[f"--add-data={data}" for data in _datas(root)],
         # Optional hidden imports; PyInstaller usually finds these, but the
         # list keeps the build stable across environments.

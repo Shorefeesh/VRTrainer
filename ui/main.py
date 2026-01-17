@@ -55,8 +55,6 @@ def build_ui(root: tk.Tk) -> None:
         save_config(config)
         services.notify_profile_updated(settings)
         session_tab.set_profile_options(trainer_profile.list_profile_names(config))
-        if services.is_trainer_running():
-            services.update_trainer_feature_states(settings)
 
     def on_trainer_profile_selected(profile_name: str) -> None:
         if not profile_name:
@@ -137,36 +135,20 @@ def build_ui(root: tk.Tk) -> None:
     # Runtime orchestration now lives alongside session joins.
 
     def _start_trainer_runtime() -> None:
-        services.stop_pet()
         trainer_settings = trainer_tab.collect_settings()
         input_device = trainer_tab.input_device
         services.start_trainer(trainer_settings, input_device)
 
     def _start_pet_runtime() -> None:
-        services.stop_trainer()
         pet_settings = pet_tab.collect_settings()
         input_device = pet_tab.input_device
         services.start_pet(pet_settings, input_device)
 
-    def _stop_all_runtimes() -> None:
-        services.stop_trainer()
-        services.stop_pet()
-
     def runtime_status_provider(role: str | None) -> dict[str, str]:
-        role = role or ""
-        if role == "trainer":
-            running = services.is_trainer_running()
-            osc_status = services.get_trainer_osc_status() if running else None
-            pishock_status = services.get_trainer_pishock_status() if running else None
-            whisper_status = services.get_trainer_whisper_backend() if running else "Stopped"
-        elif role == "pet":
-            running = services.is_pet_running()
-            osc_status = services.get_pet_osc_status() if running else None
-            pishock_status = services.get_pet_pishock_status() if running else None
-            whisper_status = services.get_pet_whisper_backend() if running else "Stopped"
-        else:
-            return {}
-
+        running = services.is_running()
+        osc_status = services.get_osc_status() if running else None
+        pishock_status = services.get_pishock_status() if running else None
+        whisper_status = services.get_whisper_backend() if running else "Stopped"
         osc_text = format_osc_status(role, osc_status) if running else "Stopped"
 
         status = {
@@ -199,7 +181,7 @@ def build_ui(root: tk.Tk) -> None:
         runtime_status_provider=runtime_status_provider,
         on_join_trainer=_start_trainer_runtime,
         on_join_pet=_start_pet_runtime,
-        on_leave_session=_stop_all_runtimes,
+        on_leave_session=services.stop_runtime,
         on_pet_profile_selected=on_pet_profile_selected,
     )
     session_tab.set_profile_options(trainer_profile.list_profile_names(config))
