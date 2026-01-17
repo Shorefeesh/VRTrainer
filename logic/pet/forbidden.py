@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import time
 from dataclasses import dataclass
-from typing import Dict, Iterable, List
+from typing import List
 
 from logic.feature import PetFeature
 
@@ -22,14 +22,6 @@ class ForbiddenWordsFeature(PetFeature):
     """
 
     feature_name = "forbidden_words"
-
-    def __init__(
-        self,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-
-        self._phrases_by_trainer: Dict[str, List[str]] = {}
 
     def start(self) -> None:
         self._start_worker(target=self._worker_loop, name="PetForbiddenWordsFeature")
@@ -59,7 +51,7 @@ class ForbiddenWordsFeature(PetFeature):
             active_configs = self._active_trainer_configs()
 
             for trainer_id, config in active_configs.items():
-                phrases = self.normalise_list(config.get("forbidden_words", []))
+                phrases = self.normalise_list(config.get(self.feature_name, []))
 
                 if not phrases:
                     continue
@@ -75,12 +67,6 @@ class ForbiddenWordsFeature(PetFeature):
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def _get_new_text(self) -> str:
-        try:
-            return
-        except Exception:
-            return ""
-
     def _contains_forbidden(self, normalised_text: str, phrases: List[str]) -> bool:
         for phrase in phrases:
             if phrase and phrase in normalised_text:
@@ -88,15 +74,8 @@ class ForbiddenWordsFeature(PetFeature):
         return False
 
     def _deliver_correction(self, trainer_id: str, config: dict) -> None:
-        try:
-            strength, duration = self._shock_params(config)
-            self.pishock.send_shock(strength=strength, duration=duration)
-            self._log(
-                f"shock trainer={trainer_id[:8]} strength={strength}"
-            )
-        except Exception:
-            return
-
-    def _shock_params(self, config: dict) -> tuple[int, float]:
         strength, duration = self._shock_params_single(config)
-        return int(strength), duration
+        self.pishock.send_shock(strength=strength, duration=duration)
+        self._log(
+            f"shock trainer={trainer_id[:8]} strength={strength}"
+        )

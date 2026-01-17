@@ -18,20 +18,8 @@ class PullFeature(PetFeature):
     ) -> None:
         super().__init__(**kwargs)
 
-        # Simple configuration – can be made user-adjustable later.
-        # Stretch values are floats in the 0–1 range.
         self._stretch_threshold: float = 0.5
-        self._poll_interval: float = 0.1
-        self._cooldown_seconds: float = 2.0
-        self._cooldown_until: float = 0.0
-
-        self._shock_strength_min: float = 20.0
-        self._shock_strength_max: float = 40.0
-
-        # Parameter base names for ears and tail.
         self._targets = ("LeftEar", "RightEar", "Tail")
-
-        self._log("event=init feature=pull")
 
     def start(self) -> None:
         self._start_worker(target=self._worker_loop, name="PetPullFeature")
@@ -54,11 +42,9 @@ class PullFeature(PetFeature):
 
             config = self._active_trainer_configs().values()[0]
 
-            # Avoid sending multiple shocks in quick succession when
-            # the avatar reports a sustained pull.
             if now >= self._cooldown_until:
                 if self._check_and_maybe_shock(now, config):
-                    self._cooldown_until = now + self._cooldown_seconds
+                    self._cooldown_until = now + self._scaled_cooldown()
 
             if self._stop_event.wait(self._poll_interval):
                 break
@@ -77,17 +63,11 @@ class PullFeature(PetFeature):
 
     def _deliver_correction(self, target: str, stretch: float, config: dict) -> None:
         """Trigger a corrective shock via PiShock."""
-        try:
-            # Scale intensity slightly with stretch so gentle pulls are
-            # milder than extreme ones.
-            shock_min, shock_max, shock_duration = self._shock_params(config)
-            scale = (stretch - self._stretch_threshold) / (1 - self._stretch_threshold)
-            strength = max(shock_min, min(shock_max, scale * shock_max))
+        shock_min, shock_max, shock_duration = self._shock_params_range(config)
+        scale = (stretch - self._stretch_threshold) / (1 - self._stretch_threshold)
+        strength = max(shock_min, min(shock_max, scale * shock_max))
 
-            self.pishock.send_shock(strength=strength, duration=shock_duration)
-            self._log(
-                f"event=shock feature=pull target={target} stretch={stretch:.2f} threshold={self._stretch_threshold:.2f} strength={strength:.1f}"
-            )
-        except Exception:
-            # Never let PiShock errors break the feature loop.
-            return
+        self.pishock.send_shock(strength=strength, duration=shock_duration)
+        self._log(
+            f"event=shock feature=pull target={target} stretch={stretch:.2f} threshold={self._stretch_threshold:.2f} strength={strength:.1f}"
+        )

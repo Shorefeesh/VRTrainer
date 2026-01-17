@@ -21,35 +21,14 @@ class WordFeature(PetFeature):
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
-        self._active = False
-
-        # Simple cooldown to avoid spamming shocks if the pet speaks
-        # in long sentences or Whisper groups multiple pronouns into
-        # one chunk.
-        self._cooldown_until: float = 0.0
 
         # Supported word games mapped to their handlers. Keys are
         # case-insensitive canonical names.
         self._game_handlers: Dict[str, Callable[[str], None]] = {
             "pronouns": self._process_pronouns_text,
         }
-        self._active_game: str | None = None
-
-        self._log(
-            "event=init feature=word_game supported_games="
-            + ",".join(sorted(self._game_handlers.keys()))
-        )
 
     def start(self) -> None:
-        if self._running:
-            return
-
-        # Ensure we only see future transcript text.
-        try:
-            self.whisper.reset_tag(self.feature_name)
-        except Exception:
-            pass
-
         self._start_worker(target=self._worker_loop, name="PetWordFeature")
 
     def stop(self) -> None:
@@ -59,73 +38,51 @@ class WordFeature(PetFeature):
     def _worker_loop(self) -> None:
         """Background loop that watches Whisper transcripts."""
         while not self._stop_event.is_set():
-            active_game = self._active_word_game()
-            if active_game != self._active_game:
-                self._log(f"event=word_game_changed active={active_game or 'none'}")
-                self._active_game = active_game
+            config, game = self._active_word_game()
 
-            now_active = bool(active_game)
-            if now_active and not self._active:
-                # Word game just became active; ignore any old speech.
-                try:
-                    self.whisper.reset_tag(self.feature_name)
-                except Exception:
-                    pass
-            self._active = now_active
-
-            if not active_game:
+            if not game:
+                self.whisper.reset_tag(self.feature_name)
                 if self._stop_event.wait(self._poll_interval):
                     break
                 continue
 
-            try:
-                text = self.whisper.get_new_text(self.feature_name)
-            except Exception:
-                text = ""
-
-            handler = self._game_handlers.get(self._normalise_game_name(active_game))
+            handler = self._game_handlers.get(self._normalise_game_name(game))
             if handler is None:
-                if self._stop_event.wait(0.5):
+                if self._stop_event.wait(self._poll_interval):
                     break
                 continue
 
-            if text:
-                handler(text)
+            text = self.whisper.get_new_text(self.feature_name)
 
-            # Sleep briefly to limit CPU usage while still reacting
-            # quickly to new speech.
-            if self._stop_event.wait(0.5):
+            if text:
+                handler(config, text)
+
+            if self._stop_event.wait(self._poll_interval):
                 break
 
-    def _active_word_game(self) -> str | None:
+    def _active_word_game(self) -> Set[dict | None, str | None]:
         configs = self._latest_trainer_settings()
         for cfg in configs.values():
             game = str(cfg.get("word_game") or "").strip()
             if game and self._normalise_game_name(game) not in ("none", "off", "disabled"):
-                return game
+                return cfg, game
 
-        return None
+        return None, None
 
     @staticmethod
     def _normalise_game_name(name: str | None) -> str:
         return (name or "").strip().lower()
 
-    def _process_pronouns_text(self, text: str) -> None:
+    def _process_pronouns_text(self, config: dict, text: str) -> None:
         """Handler for the Pronouns word game."""
-        if not text:
-            return
-
         if self._contains_disallowed_pronouns(text):
             now = time.time()
             if now >= self._cooldown_until:
-                self._deliver_correction(game="pronouns")
-                self._cooldown_until = now + self._cooldown_seconds()
+                self._deliver_correction(config, game="pronouns")
+                self._cooldown_until = now + self._scaled_cooldown(config)
 
     def _contains_disallowed_pronouns(self, text: str) -> bool:
         """Return True if the text includes first-person pronouns."""
-        if not text:
-            return False
-
         disallowed_tokens: Set[str] = {
             "i",
             "i'm",
@@ -141,17 +98,16 @@ class WordFeature(PetFeature):
             cleaned = "".join(ch for ch in raw_token if ch.isalpha() or ch in ("'", "’")).lower()
             if not cleaned:
                 continue
-
             if cleaned.replace("’", "'") in disallowed_tokens:
                 return True
 
-
         return False
 
-    def _deliver_correction(self, game: str = "word_game") -> None:
+    def _deliver_correction(self, config: dict, game: str = "word_game") -> None:
         """Trigger a corrective shock via PiShock."""
         try:
-            self.pishock.send_shock(strength=self._shock_strength, duration=0.5)
-            self._log(f"event=shock feature={game} strength={self._shock_strength}")
+            strength, duration = self._scaled_strength_single(config)
+            self.pishock.send_shock(strength, duration)
+            self._log(f"shock game={game} strength={strength}")
         except Exception:
             return

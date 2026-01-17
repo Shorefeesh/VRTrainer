@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import dataclass, field
 from typing import Dict, List
 
 from logic.feature import PetFeature
@@ -22,14 +21,12 @@ class ProximityFeature(PetFeature):
     ) -> None:
         super().__init__(**kwargs)
 
-        self._state_by_trainer: Dict[str, _TrainerProximityState] = {}
+        self._pending_command_from: str = ""
 
-        # Tunables shared by all trainers; per-trainer scaling applied on the fly.
         self._poll_interval: float = 0.1
         self._proximity_threshold: float = 0.4
         self._command_target: float = 1
-
-        self._log("event=init feature=proximity runtime=pet")
+        self._last_sample_log: float = 0
 
     def start(self) -> None:
         self._start_worker(target=self._worker_loop, name="PetProximityFeature")
@@ -42,26 +39,25 @@ class ProximityFeature(PetFeature):
         import time
 
         while not self._stop_event.is_set():
-            now = time.time()
-
-            active_configs = self._active_trainer_configs()
-            self._prune_inactive_states(active_configs)
-
             if not self._has_active_trainer():
                 if self._stop_event.wait(self._poll_interval):
                     break
                 continue
 
+            now = time.time()
+
+            active_configs = self._active_trainer_configs()
+
             summon_events = self._collect_remote_summons()
 
             proximity_value = self.osc.get_float_param("Trainer/Proximity", default=1.0)
 
-            for trainer_id, config in active_configs.items():
-                state = self._state_by_trainer.setdefault(trainer_id, _TrainerProximityState())
+            self._log_sample(now, proximity_value)
 
+            for trainer_id, config in active_configs.items():
                 if summon_events.get(trainer_id):
-                    state.pending_command_from = trainer_id
-                    state.pending_command_deadline = now + self._scaled_timeout(config)
+                    self._pending_command_from = trainer_id
+                    self._command_until = now + self._scaled_delay(config)
                     self._log(
                         f"summon_start trainer={trainer_id[:8]}"
                     )
@@ -73,11 +69,11 @@ class ProximityFeature(PetFeature):
                         target_clients=[trainer_id],
                     )
 
-                if state.pending_command_deadline is not None:
+                if self._command_until is not None:
                     if self._meets_command_target(proximity_value):
-                        state.pending_command_deadline = None
-                        trainer_target = state.pending_command_from
-                        state.pending_command_from = None
+                        self._command_until = None
+                        trainer_target = self._pending_command_from
+                        self._pending_command_from = None
                         self._log(
                             f"summon_success trainer={trainer_id[:8]} proximity={proximity_value:.3f}"
                         )
@@ -89,9 +85,9 @@ class ProximityFeature(PetFeature):
                             },
                             target_clients=[trainer_target],
                         )
-                    elif now >= state.pending_command_deadline and now >= state.cooldown_until:
-                        trainer_target = state.pending_command_from
-                        state.pending_command_from = None
+                    elif now >= self._command_until and now >= self._cooldown_until:
+                        trainer_target = self._pending_command_from
+                        self._pending_command_from = None
                         self._deliver_correction(
                             trainer_id,
                             config,
@@ -99,10 +95,10 @@ class ProximityFeature(PetFeature):
                             proximity_value,
                             target_client=trainer_target,
                         )
-                        state.cooldown_until = now + self._scaled_cooldown(config)
-                        state.pending_command_deadline = None
+                        self._cooldown_until = now + self._scaled_cooldown(config)
+                        self._command_until = None
 
-                if now >= state.cooldown_until and proximity_value <= self._proximity_threshold:
+                if now >= self._cooldown_until and proximity_value <= self._proximity_threshold:
                     self._deliver_correction(
                         trainer_id,
                         config,
@@ -110,17 +106,11 @@ class ProximityFeature(PetFeature):
                         proximity_value,
                         broadcast_trainers=True,
                     )
-                    state.cooldown_until = now + self._scaled_cooldown(config)
+                    self._cooldown_until = now + self._scaled_cooldown(config)
 
-                self._log_sample(now, trainer_id, state, proximity_value)
 
             if self._stop_event.wait(self._poll_interval):
                 break
-
-    def _prune_inactive_states(self, active_configs: Dict[str, dict]) -> None:
-        for trainer_id in list(self._state_by_trainer.keys()):
-            if trainer_id not in active_configs:
-                self._state_by_trainer.pop(trainer_id, None)
 
     def _deliver_correction(
         self,
@@ -133,7 +123,7 @@ class ProximityFeature(PetFeature):
         broadcast_trainers: bool | None = None,
     ) -> None:
         try:
-            shock_min, shock_max, shock_duration = self._shock_params(config)
+            shock_min, shock_max, shock_duration = self._shock_params_range(config)
             deficit = (self._proximity_threshold - proximity_value) / self._proximity_threshold
             strength = max(shock_min, min(shock_max, int(deficit * shock_max)))
             self.pishock.send_shock(strength=strength, duration=shock_duration)
@@ -174,28 +164,17 @@ class ProximityFeature(PetFeature):
         )
         return proximity >= self._command_target
 
-    def _log_sample(self, now: float, trainer_id: str, state: "_TrainerProximityState", proximity_value: float) -> None:
-        if now - state.last_sample_log < 1.0:
+    def _log_sample(self, now: float, proximity_value: float) -> None:
+        if now - self._last_sample_log < 1.0:
             return
 
-        state.last_sample_log = now
+        self._last_sample_log = now
         self._log(
-            f"sample trainer={trainer_id[:8]} value={proximity_value:.3f} threshold={self._proximity_threshold:.3f}"
+            f"sample proximity={proximity_value:.3f} threshold={self._proximity_threshold:.3f}"
         )
         stats = {
                 "event": "sample",
-                "value": proximity_value,
+                "proximity": proximity_value,
                 "threshold": self._proximity_threshold,
             }
-        self._send_logs(stats, [trainer_id])
-
-    def _shock_params(self, config: dict) -> tuple[float, float, float]:
-        return self._shock_params_range(config)
-
-
-@dataclass
-class _TrainerProximityState:
-    cooldown_until: float = 0.0
-    pending_command_deadline: float | None = None
-    pending_command_from: str | None = None
-    last_sample_log: float = field(default_factory=lambda: 0.0)
+        self._send_logs(stats, [self._pending_command_from])

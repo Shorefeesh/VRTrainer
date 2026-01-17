@@ -3,20 +3,17 @@ from __future__ import annotations
 from copy import deepcopy
 from typing import Any, Dict, List
 
-from logic.feature import feature_defaults
-
-_FEATURE_DEFAULTS = feature_defaults()
+from logic.feature import feature_list
 
 TRAINER_SETTINGS_KEYS = [
     "profile",
-    *_FEATURE_DEFAULTS.keys(),
+    *feature_list(),
     "word_game",
     "delay_scale",
     "cooldown_scale",
     "duration_scale",
     "strength_scale",
     "names",
-    "command_words",
     "scolding_words",
     "forbidden_words",
 ]
@@ -52,14 +49,13 @@ def default_profile_settings(profile_name: str) -> Dict[str, Any]:
     """Default settings for a new trainer profile."""
     defaults = {
         "profile": profile_name,
-        **_FEATURE_DEFAULTS,
+        **{feature: False for feature in feature_list()},
         "word_game": "None",
         "delay_scale": 1.0,
         "cooldown_scale": 1.0,
         "duration_scale": 1.0,
         "strength_scale": 1.0,
         "names": [],
-        "command_words": [],
         "scolding_words": [],
         "forbidden_words": [],
     }

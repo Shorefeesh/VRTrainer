@@ -1,8 +1,7 @@
 from __future__ import annotations
 
 import time
-from dataclasses import dataclass, field
-from typing import Dict, Iterable, List
+from typing import Dict, List
 
 from logic.feature import PetFeature
 
@@ -16,14 +15,6 @@ class ScoldingFeature(PetFeature):
     """
 
     feature_name = "scolding"
-
-    def __init__(
-        self,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-
-        self._log("init")
 
     def start(self) -> None:
         self._start_worker(target=self._worker_loop, name="PetScoldingFeature")

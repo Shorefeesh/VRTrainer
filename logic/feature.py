@@ -17,7 +17,6 @@ class FeatureContext:
     whisper: Any = None
     server: Any = None
     log_manager: SessionLogManager | None = None
-    settings: Dict[str, Any] | None = None
     config_provider: Callable[[], Dict[str, dict]] | None = None
 
 
@@ -40,14 +39,12 @@ class Feature:
         log_manager: SessionLogManager | None = None,
         log_name: str | None = None,
         config_provider: Callable[[], Dict[str, dict]] | None = None,
-        settings: Dict[str, Any] | None = None,
         **_: Any,
     ) -> None:
         self.osc = osc
         self.pishock = pishock
         self.whisper = whisper
         self.server = server
-        self.settings = settings or {}
         self.config_provider = config_provider
 
         resolved_log_name = log_name or self.log_name
@@ -65,10 +62,11 @@ class Feature:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        self._poll_interval: float = 0.5
+        self._poll_interval: float = 0.2
         self._cooldown_until: float = 0.0
-        self._base_cooldown_seconds: float = 2
-        self._base_timeout_seconds: float = 4.0
+        self._command_until: float = 0.0
+        self._base_cooldown_seconds: float = 2.0
+        self._base_delay_seconds: float = 4.0
         self._base_shock_duration: float = 0.2
         self._base_shock_strength: float = 50
         self._base_shock_strength_min: float = 10
@@ -196,8 +194,8 @@ class Feature:
         base = self._base_cooldown_seconds
         return self._scaled_value(base, config, "cooldown_scale")
 
-    def _scaled_timeout(self, config: dict) -> float:
-        base = self._base_timeout_seconds
+    def _scaled_delay(self, config: dict) -> float:
+        base = self._base_delay_seconds
         return self._scaled_value(base, config, "delay_scale")
 
     def _scaled_duration(self, config: dict) -> float:
@@ -237,9 +235,6 @@ class TrainerFeature(Feature):
 
     role = "trainer"
 
-    def _iter_pet_configs(self) -> Dict[str, dict]:
-        return self._config_map()
-
     def _pulse_command_flag(self, flag_name: str) -> None:
         osc = self.osc
         if osc is None:
@@ -256,6 +251,82 @@ class TrainerFeature(Feature):
         if not flag:
             return configs
         return any(tid for tid, cfg in configs.items() if cfg.get(flag))
+
+
+class TrainerCommandFeature(TrainerFeature):
+    """Base class for trainer-side features which triggers an event on specific command words."""
+
+    def __init__(
+        self,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._require_name: bool = False
+        self._require_scold: bool = False
+        self._send_default: bool = False
+        self._command_phrases: dict[str, list[str]] = {}
+
+    # Internal helpers -------------------------------------------------
+    def _worker_loop(self) -> None:
+        while not self._stop_event.is_set():
+            if not self._has_active_pet():
+                self.whisper.reset_tag(self.feature_name)
+                if self._stop_event.wait(self._poll_interval):
+                    break
+                continue
+
+            text = self.whisper.get_new_text(self.feature_name)
+
+            pet_configs = self._config_map()
+            if pet_configs and text:
+                for pet_id, cfg in pet_configs.items():
+                    if not cfg.get(self.feature_name):
+                        continue
+
+                    detected = self._detect_command(text, cfg)
+                    if detected is None:
+                        continue
+
+                    meta = {"feature": self.feature_name, "target_client": str(pet_id)}
+                    self.server.send_command(detected, meta)
+                    self._log(
+                        f"command pet={str(pet_id)[:8]} name={detected}"
+                    )
+
+                    self._pulse_command_flag("Trainer/Command")
+
+            if self._stop_event.wait(self._poll_interval):
+                break
+
+    def _detect_command(self, text: str, cfg: list[str]) -> str | None:
+        if not text:
+            return None
+
+        normalised = self.normalize_text(text)
+        if not normalised:
+            return None
+
+        if self._require_name:
+            names = self._extract_word_list(cfg, "names")
+            recent_chunks = self.whisper.get_recent_text_chunks(count=3)
+            recent_normalised = " ".join(self.normalize_list(recent_chunks))
+            if not any(name in recent_normalised for name in names):
+                return None
+
+        if self._require_scold:
+            scolds = self._extract_word_list(cfg, "scolding_words")
+            if not any(scold in normalised for scold in scolds):
+                return None
+
+        for cmd, phrases in self._command_phrases.items():
+            for phrase in phrases:
+                if phrase and phrase in normalised:
+                    return cmd
+
+        if self._send_default:
+            return cmd
+
+        return None
 
 
 class PetFeature(Feature):
@@ -285,9 +356,7 @@ class FeatureDefinition:
     label: str
     trainer_cls: Type[TrainerFeature] | None = None
     pet_cls: Type[PetFeature] | None = None
-    trainer_log: str | None = None
-    pet_log: str | None = None
-    enabled_by_default: bool = False
+    log_name: str = None
     show_in_ui: bool = True
     ui_column: int = 0
     build_kwargs: FeatureKwargsBuilder | None = None
@@ -297,13 +366,6 @@ class FeatureDefinition:
             return self.trainer_cls
         if role == "pet":
             return self.pet_cls
-        return None
-
-    def resolve_log_name(self, role: str) -> str | None:
-        if role == "trainer":
-            return self.trainer_log
-        if role == "pet":
-            return self.pet_log
         return None
 
     def kwargs_for(self, role: str, context: FeatureContext) -> Dict[str, Any]:
@@ -327,25 +389,10 @@ class FeatureDefinition:
             whisper=context.whisper,
             server=context.server,
             log_manager=context.log_manager,
-            log_name=self.resolve_log_name(role),
+            log_name=self.log_name,
             config_provider=context.config_provider,
-            settings=context.settings,
             **kwargs,
         )
-
-
-def _trainer_names_kwargs(role: str, context: FeatureContext) -> Dict[str, Any]:
-    if role != "trainer":
-        return {}
-    settings = context.settings or {}
-    return {"names": settings.get("names") or [], "config_provider": context.config_provider}
-
-
-def _trainer_scolding_kwargs(role: str, context: FeatureContext) -> Dict[str, Any]:
-    if role != "trainer":
-        return {}
-    settings = context.settings or {}
-    return {"scolding_words": settings.get("scolding_words") or [], "config_provider": context.config_provider}
 
 
 def feature_definitions() -> List[FeatureDefinition]:
@@ -365,74 +412,66 @@ def feature_definitions() -> List[FeatureDefinition]:
 
     return [
         FeatureDefinition(
-            key="feature_focus",
+            key="focus",
             label="Focus",
             trainer_cls=TrainerFocusFeature,
             pet_cls=FocusFeature,
-            trainer_log="trainer_focus_feature.log",
-            pet_log="focus_feature.log",
-            build_kwargs=_trainer_names_kwargs,
+            log_name="focus_feature.log",
         ),
         FeatureDefinition(
-            key="feature_proximity",
+            key="proximity",
             label="Proximity",
             trainer_cls=TrainerProximityFeature,
             pet_cls=ProximityFeature,
-            trainer_log="trainer_proximity_feature.log",
-            pet_log="proximity_feature.log",
-            build_kwargs=_trainer_names_kwargs,
+            log_name="proximity_feature.log",
         ),
         FeatureDefinition(
-            key="feature_tricks",
+            key="tricks",
             label="Tricks",
             trainer_cls=TrainerTricksFeature,
             pet_cls=TricksFeature,
-            trainer_log="trainer_tricks_feature.log",
-            pet_log="tricks_feature.log",
-            build_kwargs=_trainer_names_kwargs,
+            log_name="tricks_feature.log",
         ),
         FeatureDefinition(
-            key="feature_scolding",
-            label="Scolding words",
+            key="scolding",
+            label="Scolding Words",
             trainer_cls=TrainerScoldingFeature,
             pet_cls=ScoldingFeature,
-            trainer_log="trainer_scolding_feature.log",
-            pet_log="scolding_feature.log",
-            build_kwargs=_trainer_scolding_kwargs,
+            log_name="scolding_feature.log",
         ),
         FeatureDefinition(
-            key="feature_forbidden_words",
-            label="Forbidden words",
+            key="forbidden",
+            label="Forbidden Words",
             pet_cls=ForbiddenWordsFeature,
-            pet_log="forbidden_words_feature.log",
+            log_name="forbidden_feature.log",
         ),
         FeatureDefinition(
-            key="feature_ear_tail",
-            label="Ear/Tail pull",
+            key="pull",
+            label="Ear/Tail Pull",
             pet_cls=PullFeature,
-            pet_log="pull_feature.log",
+            log_name="pull_feature.log",
             ui_column=1,
         ),
         FeatureDefinition(
-            key="feature_depth",
+            key="depth",
             label="Depth",
             pet_cls=DepthFeature,
-            pet_log="depth_feature.log",
+            log_name="depth_feature.log",
             ui_column=1,
         ),
         FeatureDefinition(
-            key="feature_pronouns",
-            label="Pronouns",
+            key="wordgame",
+            label="Word Game",
             pet_cls=WordFeature,
-            pet_log="wordgame_feature.log",
+            log_name="wordgame_feature.log",
             show_in_ui=False,
         ),
     ]
 
 
-def feature_defaults() -> Dict[str, bool]:
+def feature_list() -> Dict[str, bool]:
     """Return default enablement flags keyed by feature config key."""
-    return {definition.key: definition.enabled_by_default for definition in feature_definitions()}
+    return [definition.key for definition in feature_definitions()]
 
 
 def ui_feature_definitions() -> List[FeatureDefinition]:

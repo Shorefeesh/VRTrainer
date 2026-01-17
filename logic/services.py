@@ -10,12 +10,12 @@ from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
 from interfaces.server import RemoteServerInterface
-from logic.feature import FeatureContext, build_features_for_role, feature_definitions
+from logic.feature import FeatureContext, build_features_for_role
 from logic.logging_utils import SessionLogManager
 
 
 @dataclass
-class TrainerRuntime:
+class Runtime:
     """Holds running trainer interfaces and feature instances."""
 
     osc: VRChatOSCInterface
@@ -25,19 +25,7 @@ class TrainerRuntime:
     features: List[Any] = field(default_factory=list)
 
 
-@dataclass
-class PetRuntime:
-    """Holds running pet interfaces and feature instances."""
-
-    osc: VRChatOSCInterface
-    pishock: PiShockInterface
-    whisper: WhisperInterface
-    logs: SessionLogManager
-    features: List[Any] = field(default_factory=list)
-
-
-_trainer_runtime: Optional[TrainerRuntime] = None
-_pet_runtime: Optional[PetRuntime] = None
+_runtime: Optional[Runtime] = None
 _server_interface: Optional[RemoteServerInterface] = None
 _logger = logging.getLogger(__name__)
 _status_cache: Dict[str, Dict[str, Any]] = {"trainer": {}, "pet": {}}
@@ -70,46 +58,6 @@ def _maybe_publish_status(role: str, status: Dict[str, str]) -> None:
         cache["ts"] = now
     except Exception:
         pass
-
-
-def _apply_feature_flags(features: List[Any], feature_flags: Dict[type, bool]) -> None:
-    """Set enabled state on all known features when supported."""
-
-    for feature in features:
-        for cls, enabled in feature_flags.items():
-            if isinstance(feature, cls):
-                if hasattr(feature, "set_enabled"):
-                    feature.set_enabled(bool(enabled))
-                break
-
-
-def _apply_feature_scaling(features: List[Any], scaling: Dict[str, float]) -> None:
-    """Push scaling factors to all features that support runtime updates."""
-    for feature in features:
-        if hasattr(feature, "set_scaling"):
-            feature.set_scaling(
-                delay_scale=scaling.get("delay_scale", 1.0),
-                cooldown_scale=scaling.get("cooldown_scale", 1.0),
-                duration_scale=scaling.get("duration_scale", 1.0),
-                strength_scale=scaling.get("strength_scale", 1.0),
-            )
-
-
-def _extract_scaling(settings: Dict[str, Any]) -> Dict[str, float]:
-    """Clamp and normalise scaling values from settings dict."""
-    def _safe_scale(key: str) -> float:
-        try:
-            value = float(settings.get(key, 1.0))
-        except Exception:
-            value = 1.0
-        return max(0.0, min(2.0, value))
-
-    return {
-        "delay_scale": _safe_scale("delay_scale"),
-        "cooldown_scale": _safe_scale("cooldown_scale"),
-        "duration_scale": _safe_scale("duration_scale"),
-        "strength_scale": _safe_scale("strength_scale"),
-    }
 
 
 def _create_server(role: str) -> RemoteServerInterface:
@@ -376,7 +324,7 @@ def get_server_session_details() -> dict:
     return details
 
 
-def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str]) -> TrainerRuntime:
+def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str]) -> Runtime:
     logs = SessionLogManager("trainer")
 
     osc = VRChatOSCInterface(
@@ -403,17 +351,9 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
         whisper=whisper,
         server=server,
         log_manager=logs,
-        settings=trainer_settings,
         config_provider=get_assigned_pet_configs,
     )
     features: List[Any] = build_features_for_role("trainer", trainer_context)
-
-    feature_flags = {
-        definition.trainer_cls: bool(trainer_settings.get(definition.key))
-        for definition in feature_definitions()
-        if definition.trainer_cls is not None
-    }
-    _apply_feature_flags(features, feature_flags)
 
     for feature in features:
         if hasattr(feature, "start"):
@@ -421,10 +361,10 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
 
     _replay_profile_configs()
 
-    return TrainerRuntime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
+    return Runtime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
 
 
-def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> PetRuntime:
+def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Runtime:
     logs = SessionLogManager("pet")
 
     osc = VRChatOSCInterface(
@@ -455,7 +395,6 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
         whisper=whisper,
         server=server,
         log_manager=logs,
-        settings=pet_settings,
     )
 
     features: List[Any] = build_features_for_role("pet", pet_context)
@@ -464,7 +403,7 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
         if hasattr(feature, "start"):
             feature.start()
 
-    return PetRuntime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
+    return Runtime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
 
 
 def start_trainer(trainer_settings: dict, input_device: Optional[str]) -> None:
@@ -473,49 +412,30 @@ def start_trainer(trainer_settings: dict, input_device: Optional[str]) -> None:
     This function is intended to be called when the Trainer tab's Start
     button is pressed.
     """
-    global _trainer_runtime
+    global _runtime
 
     # If already running, stop the previous runtime first.
-    if _trainer_runtime is not None:
-        stop_trainer()
+    if _runtime is not None:
+        stop_runtime()
 
-    _trainer_runtime = _build_trainer_interfaces(trainer_settings, input_device)
-
-
-def update_trainer_feature_states(trainer_settings: dict) -> None:
-    """Update trainer feature enablement without restarting services."""
-
-    runtime = _trainer_runtime
-    if runtime is None:
-        return
-
-    # Push difficulty scaling to any features that support live updates.
-    _apply_feature_scaling(runtime.features, _extract_scaling(trainer_settings))
-
-    # Refresh scolding words for the running trainer scolding feature.
-    scolding_words = trainer_settings.get("scolding_words")
-    scolding_cls = next(
-        (definition.trainer_cls for definition in feature_definitions() if definition.key == "feature_scolding"),
-        None,
-    )
-    for feature in runtime.features:
-        if scolding_cls is not None and isinstance(feature, scolding_cls):
-            feature.set_scolding_words(scolding_words)
-            break
-
-    feature_flags = {
-        definition.trainer_cls: bool(trainer_settings.get(definition.key))
-        for definition in feature_definitions()
-        if definition.trainer_cls is not None
-    }
-    _apply_feature_flags(runtime.features, feature_flags)
+    _runtime = _build_trainer_interfaces(trainer_settings, input_device)
 
 
-def stop_trainer() -> None:
+def start_pet(pet_settings: dict, input_device: Optional[str]) -> None:
+    """Launch all interfaces and construct feature instances for enabled pet features."""
+    global _runtime
+
+    if _runtime is not None:
+        stop_runtime()
+
+    _runtime = _build_pet_interfaces(pet_settings, input_device)
+
+
+def stop_runtime() -> None:
     """Tear down running trainer interfaces and features, if any."""
-    global _trainer_runtime
+    global _runtime
 
-    runtime = _trainer_runtime
+    runtime = _runtime
     if runtime is None:
         return
 
@@ -529,85 +449,27 @@ def stop_trainer() -> None:
     runtime.pishock.stop()
     runtime.osc.stop()
 
-    _trainer_runtime = None
+    _runtime = None
 
 
-def start_pet(pet_settings: dict, input_device: Optional[str]) -> None:
-    """Launch all interfaces and construct feature instances for enabled pet features."""
-    global _pet_runtime
-
-    if _pet_runtime is not None:
-        stop_pet()
-
-    _pet_runtime = _build_pet_interfaces(pet_settings, input_device)
-
-
-def stop_pet() -> None:
-    """Tear down running pet interfaces and features, if any."""
-    global _pet_runtime
-
-    runtime = _pet_runtime
-    if runtime is None:
-        return
-
-    for feature in runtime.features:
-        if hasattr(feature, "stop"):
-            feature.stop()
-
-    runtime.whisper.stop()
-    runtime.pishock.stop()
-    runtime.osc.stop()
-
-    _pet_runtime = None
-
-
-def is_trainer_running() -> bool:
+def is_running() -> bool:
     """Return True if trainer services are currently active."""
-    return _trainer_runtime is not None
+    return _runtime is not None
 
 
-def is_pet_running() -> bool:
-    """Return True if pet services are currently active."""
-    return _pet_runtime is not None
-
-
-def get_trainer_osc_status() -> Optional[Dict[str, Any]]:
-    """Return a snapshot of trainer OSC diagnostics, if running."""
-    runtime = _trainer_runtime
-    if runtime is None:
-        return None
-    return runtime.osc.get_status_snapshot()
-
-
-def get_trainer_pishock_status() -> Optional[Dict[str, Any]]:
-    """Return a snapshot of trainer PiShock status, if running."""
-    runtime = _trainer_runtime
-    if runtime is None:
-        return None
-
-    pishock = runtime.pishock
-    return {
-        "enabled": getattr(pishock, "enabled", True),
-        "connected": pishock.is_connected,
-        "has_credentials": bool(getattr(pishock, "username", "") and getattr(pishock, "api_key", "")),
-    }
-
-
-def get_pet_osc_status() -> Optional[Dict[str, Any]]:
+def get_osc_status() -> Optional[Dict[str, Any]]:
     """Return a snapshot of pet OSC diagnostics, if running."""
-    runtime = _pet_runtime
-    if runtime is None:
+    if _runtime is None:
         return None
-    return runtime.osc.get_status_snapshot()
+    return _runtime.osc.get_status_snapshot()
 
 
-def get_pet_pishock_status() -> Optional[Dict[str, Any]]:
+def get_pishock_status() -> Optional[Dict[str, Any]]:
     """Return a snapshot of pet PiShock status, if running."""
-    runtime = _pet_runtime
-    if runtime is None:
+    if _runtime is None:
         return None
 
-    pishock = runtime.pishock
+    pishock = _runtime.pishock
     return {
         "enabled": getattr(pishock, "enabled", True),
         "connected": pishock.is_connected,
@@ -615,45 +477,21 @@ def get_pet_pishock_status() -> Optional[Dict[str, Any]]:
     }
 
 
-def get_trainer_whisper_log_text() -> str:
-    """Return new Whisper transcript text for the trainer UI log.
-
-    Uses a dedicated tag so UI logging does not interfere with
-    feature-specific transcript consumption.
-    """
-    runtime = _trainer_runtime
-    if runtime is None:
+def get_whisper_log_text() -> str:
+    """Return new Whisper transcript text for the UI log."""
+    if _runtime is None:
         return ""
 
-    return runtime.whisper.get_new_text("trainer_ui_log")
+    return _runtime.whisper.get_new_text("ui_log")
 
 
-def get_pet_whisper_log_text() -> str:
-    """Return new Whisper transcript text for the pet UI log."""
-    runtime = _pet_runtime
-    if runtime is None:
-        return ""
-
-    return runtime.whisper.get_new_text("pet_ui_log")
-
-
-def get_trainer_whisper_backend() -> str:
-    runtime = _trainer_runtime
-    if runtime is None:
+def get_whisper_backend() -> str:
+    if _runtime is None:
         return "Stopped"
-    return runtime.whisper.get_backend_summary()
-
-
-def get_pet_whisper_backend() -> str:
-    runtime = _pet_runtime
-    if runtime is None:
-        return "Stopped"
-    return runtime.whisper.get_backend_summary()
+    return _runtime.whisper.get_backend_summary()
 
 
 def publish_runtime_status(role: str, status: Dict[str, str]) -> None:
     """Share the latest runtime status with the active session."""
 
-    if role not in {"trainer", "pet"}:
-        return
     _maybe_publish_status(role, status)

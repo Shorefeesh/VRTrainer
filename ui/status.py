@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import tkinter as tk
 from tkinter import ttk
 
 from logic import services
@@ -125,21 +124,10 @@ class ConnectionStatusPanel(ttk.LabelFrame):
             self.server_indicator.set_status("Idle", "grey")
 
     def _update_runtime_indicators(self, role: str | None) -> None:
-        if role == "trainer":
-            running = services.is_trainer_running()
-            osc_status = services.get_trainer_osc_status() if running else None
-            pishock_status = services.get_trainer_pishock_status() if running else None
-            whisper_status = services.get_trainer_whisper_backend() if running else "Stopped"
-        elif role == "pet":
-            running = services.is_pet_running()
-            osc_status = services.get_pet_osc_status() if running else None
-            pishock_status = services.get_pet_pishock_status() if running else None
-            whisper_status = services.get_pet_whisper_backend() if running else "Stopped"
-        else:
-            running = False
-            osc_status = None
-            pishock_status = None
-            whisper_status = "Role not set"
+        running = services.is_running()
+        osc_status = services.get_osc_status() if running else None
+        pishock_status = services.get_pishock_status() if running else None
+        whisper_status = services.get_whisper_backend() if running else "Stopped"
 
         osc_text = format_osc_status(role or "", osc_status) if running else ("Stopped" if role else "Role not set")
         self.osc_indicator.set_status(osc_text, _osc_colour(role or "", running, osc_status))
