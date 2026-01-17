@@ -284,7 +284,12 @@ class WhisperInterface:
         model = self._whisper_model
 
         samplerate = 16000
-        block_duration = 3.0  # seconds per transcription window
+        analysis_window = 1.0  # seconds per silence/energy check
+        silence_timeout = 1.0  # seconds of silence to end the clip
+        max_clip_duration = 5.0  # seconds per transcription window
+
+        chunk_samples = int(samplerate * analysis_window)
+        max_clip_samples = int(samplerate * max_clip_duration)
 
         all_devices = sd.query_devices()
         selected_devices = [device for device in all_devices if device['name'] == self.input_device]
@@ -295,7 +300,73 @@ class WhisperInterface:
             msg = "Couldn't find selected audio device"
             raise RuntimeError(msg)
 
+        min_rms_env = os.environ.get("WHISPER_MIN_RMS")
+        try:
+            min_rms = float(min_rms_env) if min_rms_env is not None else 0.005
+        except ValueError:
+            min_rms = 0.005
+
         try:  # pragma: no cover - environment/hardware specific
+            import numpy as np  # type: ignore[import-not-found]
+
+            pending_audio = np.empty(0, dtype="float32")
+            clip_buffers: List["np.ndarray"] = []
+            clip_samples = 0
+            clip_active = False
+            silent_duration = 0.0
+
+            def reset_clip_state() -> None:
+                nonlocal clip_buffers, clip_samples, clip_active, silent_duration
+                clip_buffers = []
+                clip_samples = 0
+                clip_active = False
+                silent_duration = 0.0
+
+            def transcribe_clip() -> None:
+                nonlocal clip_buffers
+                if not clip_buffers:
+                    reset_clip_state()
+                    return
+
+                try:
+                    audio = np.concatenate(clip_buffers)
+                except Exception:
+                    reset_clip_state()
+                    return
+
+                reset_clip_state()
+
+                if audio.size == 0:
+                    return
+
+                try:
+                    # faster_whisper returns an iterator of segments and an
+                    # info object. We concatenate the recognised text of all
+                    # segments into a single string.
+                    try:
+                        segments, _info = model.transcribe(audio, vad_filter=True, language="en")
+                    except TypeError:
+                        segments, _info = model.transcribe(audio, language="en")
+                except Exception:
+                    return
+
+                collected_parts: List[str] = []
+                try:
+                    for segment in segments:
+                        part = getattr(segment, "text", "") or ""
+                        part = part.strip()
+                        if part:
+                            collected_parts.append(part)
+                except Exception:
+                    return
+
+                text = " ".join(collected_parts).strip()
+                if not text:
+                    return
+
+                with self._lock:
+                    self._transcript.append(_TranscriptChunk(text=text))
+
             with sd.InputStream(
                 samplerate=samplerate,
                 channels=1,
@@ -304,88 +375,71 @@ class WhisperInterface:
                 blocksize=0,
                 callback=self._make_audio_callback(),
             ):
-                # Main loop: wake up periodically, batch whatever audio
-                # is present, and run a transcription pass.
+                # Main loop: build up clips with silence gating and length limits.
                 while not self._stop_event.is_set():
-                    start_time = time.time()
-                    frames: List[bytes] = []
+                    try:
+                        data = self._audio_queue.get(timeout=0.1)
+                    except queue.Empty:
+                        continue
 
-                    # Collect audio for roughly block_duration seconds.
-                    while time.time() - start_time < block_duration and not self._stop_event.is_set():
+                    try:
+                        audio_chunk = np.frombuffer(data, dtype="float32")
+                    except Exception:
+                        continue
+
+                    if audio_chunk.size == 0:
+                        continue
+
+                    if pending_audio.size == 0:
+                        pending_audio = audio_chunk
+                    else:
+                        pending_audio = np.concatenate([pending_audio, audio_chunk])
+
+                    # Process audio in 1-second chunks to detect speech and silence.
+                    while pending_audio.size >= chunk_samples and not self._stop_event.is_set():
+                        chunk = pending_audio[:chunk_samples]
+                        pending_audio = pending_audio[chunk_samples:]
+
                         try:
-                            data = self._audio_queue.get(timeout=0.1)
-                        except queue.Empty:
-                            continue
-                        frames.append(data)
+                            rms = float(np.sqrt(np.mean(np.square(chunk), dtype="float64")))
+                        except Exception:
+                            rms = 0.0
 
-                    if not frames or self._stop_event.is_set():
-                        continue
+                        if not clip_active:
+                            # Drop leading silence in 1 second windows until speech is detected.
+                            if rms < min_rms:
+                                continue
+                            clip_active = True
+                            silent_duration = 0.0
 
-                    # Concatenate into a single block for Whisper.
-                    import numpy as np  # type: ignore[import-not-found]
+                        if rms < min_rms:
+                            silent_duration += analysis_window
+                            if silent_duration >= silence_timeout:
+                                transcribe_clip()
+                                break
+                        else:
+                            silent_duration = 0.0
 
-                    try:
-                        audio = np.concatenate([np.frombuffer(f, dtype="float32") for f in frames])
-                    except Exception:
-                        continue
+                        remaining_samples = max_clip_samples - clip_samples
+                        if remaining_samples <= 0:
+                            transcribe_clip()
+                            # Reprocess the current chunk as the start of the next clip.
+                            pending_audio = np.concatenate([chunk, pending_audio])
+                            break
 
-                    if audio.size == 0:
-                        continue
+                        if chunk.size > remaining_samples:
+                            chunk = chunk[:remaining_samples]
 
-                    # Simple energy-based noise/silence gate: if the
-                    # RMS level of the window is extremely low, skip
-                    # transcription entirely. This avoids Whisper
-                    # emitting spurious text from background noise.
-                    try:
-                        rms = float(np.sqrt(np.mean(np.square(audio), dtype="float64")))
-                    except Exception:
-                        rms = 0.0
+                        clip_buffers.append(chunk)
+                        clip_samples += chunk.size
 
-                    # This threshold is intentionally conservative; it
-                    # can be adjusted via the WHISPER_MIN_RMS
-                    # environment variable if needed.
-                    min_rms_env = os.environ.get("WHISPER_MIN_RMS")
-                    try:
-                        min_rms = float(min_rms_env) if min_rms_env is not None else 0.005
-                    except ValueError:
-                        min_rms = 0.005
+                        if clip_samples >= max_clip_samples:
+                            transcribe_clip()
+                            break
 
-                    if rms < min_rms:
-                        continue
-
-                    try:
-                        # faster_whisper returns an iterator of segments and an
-                        # info object. We concatenate the recognised text of all
-                        # segments into a single string.
-                        # Use the built-in VAD filter when supported to
-                        # further reduce noise-only segments.
-                        try:
-                            segments, _info = model.transcribe(audio, vad_filter=True, language="en")
-                        except TypeError:
-                            # Older faster_whisper versions may not
-                            # support vad_filter; fall back gracefully.
-                            segments, _info = model.transcribe(audio, language="en")
-                    except Exception:
-                        # On any transcription error, skip this block.
-                        continue
-
-                    collected_parts: List[str] = []
-                    try:
-                        for segment in segments:
-                            part = getattr(segment, "text", "") or ""
-                            part = part.strip()
-                            if part:
-                                collected_parts.append(part)
-                    except Exception:
-                        # If iterating over segments fails for any reason, skip.
-                        continue
-
-                    text = " ".join(collected_parts).strip()
-                    if not text:
-                        continue
-
-                    with self._lock:
-                        self._transcript.append(_TranscriptChunk(text=text))
+                # Flush any in-progress clip if we exit the loop naturally.
+                if clip_buffers:
+                    transcribe_clip()
         except Exception:
             logging.exception("Unexpected exception occurred")
             # If audio capture fails (no device, permission issue, etc.),
