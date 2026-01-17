@@ -1,98 +1,43 @@
 from __future__ import annotations
 
-import threading
 from typing import Callable, Dict
 
-from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.server import RemoteServerInterface
-from interfaces.whisper import WhisperInterface
-from logic.logging_utils import LogFile
+from logic.feature import TrainerFeature
 
 
-class TrainerFocusFeature:
+class TrainerFocusFeature(TrainerFeature):
     """Trainer-side listener that relays focus-related voice cues."""
+
+    feature_name = "focus"
 
     def __init__(
         self,
-        whisper: WhisperInterface,
-        server: RemoteServerInterface,
-        osc: VRChatOSCInterface | None = None,
         *,
-        names: list[str] | None = None,
         config_provider: Callable[[], Dict[str, dict]] | None = None,
-        logger: LogFile | None = None,
+        **kwargs,
     ) -> None:
-        self.whisper = whisper
-        self.server = server
-        self.osc = osc
-        self._logger = logger
-        self._enabled = True
-        self._running = False
+        super().__init__(config_provider=config_provider, **kwargs)
 
-        self._whisper_tag: str = "trainer_focus_feature"
-        self._config_provider = config_provider
-        self._default_pet_names: list[str] = [self._normalise(name) for name in (names or []) if self._normalise(name)]
         self._default_command_phrases: list[str] = ["come here", "heel"]
         self._poll_interval: float = 0.1
 
-        self._thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
-
     def start(self) -> None:
-        if self._running:
-            return
-
-        self._running = True
-        self._stop_event.clear()
-
-        try:
-            self.whisper.reset_tag(self._whisper_tag)
-        except Exception:
-            pass
-
-        thread = self._thread = threading.Thread(
-            target=self._worker_loop,
-            name="TrainerFocusFeature",
-            daemon=True,
-        )
-        thread.start()
-
-        self._log("event=start feature=focus runtime=trainer")
+        self._start_worker(target=self._worker_loop, name="TrainerFocusFeature")
 
     def stop(self) -> None:
-        if not self._running:
-            return
-
-        self._running = False
-        self._stop_event.set()
-
-        thread = self._thread
-        if thread is not None:
-            thread.join(timeout=1.0)
-        self._thread = None
-
-        self._log("event=stop feature=focus runtime=trainer")
+        self._stop_worker()
 
     # Internal helpers -------------------------------------------------
-    def set_enabled(self, enabled: bool) -> None:
-        enabled = bool(enabled)
-        if enabled and not self._enabled:
-            # Drop any backlog so we only react to speech after enabling.
-            try:
-                self.whisper.reset_tag(self._whisper_tag)
-            except Exception:
-                pass
-        self._enabled = enabled
-
     def _worker_loop(self) -> None:
         while not self._stop_event.is_set():
-            if not self._enabled:
+            if not self._has_active_pet():
+                self.whisper.reset_tag(self.feature_name)
                 if self._stop_event.wait(self._poll_interval):
                     break
                 continue
 
             try:
-                text = self.whisper.get_new_text(self._whisper_tag)
+                text = self.whisper.get_new_text(self.feature_name)
             except Exception:
                 text = ""
 
@@ -103,7 +48,7 @@ class TrainerFocusFeature:
                 break
 
     def _maybe_send_focus_command(self, text: str) -> None:
-        normalised = self._normalise(text)
+        normalised = self.normalise_text(text)
         if not normalised:
             return
 
@@ -118,94 +63,30 @@ class TrainerFocusFeature:
                 continue
 
             penalties: list[str] = []
-            pet_names = self._extract_names(cfg)
+            pet_names = self._extract_word_list(cfg, "names")
             if pet_names and any(name in normalised for name in pet_names):
                 penalties.append("name")
 
-            command_words = self._get_command_phrases(cfg)
-            if any(cmd in normalised for cmd in command_words):
+            if any(cmd in normalised for cmd in self._default_command_phrases):
                 penalties.append("command_word")
 
             if not penalties:
                 continue
 
-            meta = {"feature": "focus", "reasons": penalties, "text": normalised, "target_client": str(pet_id)}
+            meta = {"feature": self.feature_name, "reasons": penalties, "text": normalised, "target_client": str(pet_id)}
 
             try:
                 self.server.send_command("focus", meta)
                 self._log(
-                    f"event=command_start feature=focus runtime=trainer pet={str(pet_id)[:8]} reasons={'|'.join(penalties)} text={normalised}"
+                    f"command_start pet={str(pet_id)[:8]} reasons={'|'.join(penalties)} text={normalised}"
                 )
                 self._pulse_command_flag("Trainer/CommandFocus")
             except Exception:
                 continue
 
-    def _get_command_phrases(self, config: dict | None) -> list[str]:
-        raw = []
-        try:
-            if isinstance(config, dict):
-                raw = config.get("command_words", []) or []
-            else:
-                raw = self.server.get_setting("command_words", []) or []
-        except Exception:
-            raw = []
-
-        phrases = [self._normalise(word) for word in raw if self._normalise(word)]
-        if not phrases:
-            phrases = [self._normalise(word) for word in self._default_command_phrases]
-        return phrases
-
-    @staticmethod
-    def _normalise(text: str) -> str:
-        if not text:
-            return ""
-
-        chars: list[str] = []
-        for ch in text.lower():
-            if ch.isalnum():
-                chars.append(ch)
-            elif ch.isspace():
-                chars.append(" ")
-            else:
-                chars.append(" ")
-
-        return " ".join("".join(chars).split())
-
-    def _log(self, message: str) -> None:
-        logger = self._logger
-        if logger is None:
-            return
-
-        try:
-            logger.log(message)
-        except Exception:
-            return
-
-    def _pulse_command_flag(self, flag_name: str) -> None:
-        osc = self.osc
-        if osc is None:
-            return
-
-        try:
-            osc.pulse_parameter(flag_name, value_on=1, value_off=0, duration=0.2)
-        except Exception:
-            return
-
     # Config helpers -------------------------------------------------
-    def _iter_pet_configs(self) -> Dict[str, dict]:
-        provider = self._config_provider
-        if provider is None:
-            return {}
-
-        try:
-            configs = provider() or {}
-            return {pid: cfg for pid, cfg in configs.items() if isinstance(cfg, dict)}
-        except Exception:
-            return {}
 
     def _extract_names(self, config: dict) -> list[str]:
         names = config.get("names") if isinstance(config, dict) else None
-        pet_names = [self._normalise(n) for n in (names or []) if self._normalise(n)]
-        if not pet_names:
-            pet_names = list(self._default_pet_names)
+        pet_names = self.normalise_list(names)
         return pet_names

@@ -10,19 +10,8 @@ from interfaces.pishock import PiShockInterface
 from interfaces.vrchatosc import VRChatOSCInterface
 from interfaces.whisper import WhisperInterface
 from interfaces.server import RemoteServerInterface
+from logic.feature import FeatureContext, build_features_for_role, feature_definitions
 from logic.logging_utils import SessionLogManager
-from logic.pet.focus import FocusFeature
-from logic.pet.forbidden import ForbiddenWordsFeature
-from logic.pet.wordgame import WordFeature
-from logic.pet.proximity import ProximityFeature
-from logic.pet.pull import PullFeature
-from logic.pet.depth import DepthFeature
-from logic.pet.scolding import ScoldingFeature
-from logic.pet.tricks import TricksFeature
-from logic.trainer.focus import TrainerFocusFeature
-from logic.trainer.proximity import TrainerProximityFeature
-from logic.trainer.scolding import TrainerScoldingFeature
-from logic.trainer.tricks import TrainerTricksFeature
 
 
 @dataclass
@@ -138,8 +127,6 @@ def _create_server(role: str) -> RemoteServerInterface:
         server.record_local_event("Server unreachable; working offline")
 
     return server
-
-
 
 
 def _ensure_server(role: str | None = None) -> RemoteServerInterface:
@@ -409,50 +396,24 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
     whisper.start()
     server = _ensure_server(role="trainer")
 
-    features: List[Any] = [
-        TrainerFocusFeature(
-            whisper=whisper,
-            server=server,
-            osc=osc,
-            names=trainer_settings.get("names") or [],
-            config_provider=get_assigned_pet_configs,
-            logger=logs.get_logger("trainer_focus_feature.log"),
-        ),
-        TrainerProximityFeature(
-            whisper=whisper,
-            server=server,
-            osc=osc,
-            names=trainer_settings.get("names") or [],
-            config_provider=get_assigned_pet_configs,
-            logger=logs.get_logger("trainer_proximity_feature.log"),
-        ),
-        TrainerTricksFeature(
-            whisper=whisper,
-            server=server,
-            osc=osc,
-            names=trainer_settings.get("names") or [],
-            config_provider=get_assigned_pet_configs,
-            logger=logs.get_logger("trainer_tricks_feature.log"),
-        ),
-        TrainerScoldingFeature(
-            whisper=whisper,
-            server=server,
-            osc=osc,
-            scolding_words=trainer_settings.get("scolding_words") or [],
-            config_provider=get_assigned_pet_configs,
-            logger=logs.get_logger("trainer_scolding_feature.log"),
-        ),
-    ]
-
-    _apply_feature_flags(
-        features,
-        {
-            TrainerFocusFeature: bool(trainer_settings.get("feature_focus")),
-            TrainerProximityFeature: bool(trainer_settings.get("feature_proximity")),
-            TrainerTricksFeature: bool(trainer_settings.get("feature_tricks")),
-            TrainerScoldingFeature: bool(trainer_settings.get("feature_scolding")),
-        },
+    trainer_context = FeatureContext(
+        role="trainer",
+        osc=osc,
+        pishock=pishock,
+        whisper=whisper,
+        server=server,
+        log_manager=logs,
+        settings=trainer_settings,
+        config_provider=get_assigned_pet_configs,
     )
+    features: List[Any] = build_features_for_role("trainer", trainer_context)
+
+    feature_flags = {
+        definition.trainer_cls: bool(trainer_settings.get(definition.key))
+        for definition in feature_definitions()
+        if definition.trainer_cls is not None
+    }
+    _apply_feature_flags(features, feature_flags)
 
     for feature in features:
         if hasattr(feature, "start"):
@@ -487,58 +448,17 @@ def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Pe
 
     server = _ensure_server(role="pet")
 
-    features: List[Any] = [
-        PullFeature(
-            osc=osc,
-            pishock=pishock,
-            server=server,
-            logger=logs.get_logger("pull_feature.log")
-        ),
-        DepthFeature(
-            osc=osc,
-            pishock=pishock,
-            server=server,
-            logger=logs.get_logger("depth_feature.log")
-        ),
-        ForbiddenWordsFeature(
-            osc=osc,
-            pishock=pishock,
-            whisper=whisper,
-            server=server,
-            logger=logs.get_logger("forbidden_words_feature.log"),
-        ),
-        WordFeature(
-            osc=osc,
-            pishock=pishock,
-            whisper=whisper,
-            server=server,
-            logger=logs.get_logger("wordgame_feature.log")
-        ),
-        FocusFeature(
-            osc=osc,
-            pishock=pishock,
-            server=server,
-            logger=logs.get_logger("focus_feature.log"),
-        ),
-        ProximityFeature(
-            osc=osc,
-            pishock=pishock,
-            server=server,
-            logger=logs.get_logger("proximity_feature.log"),
-        ),
-        TricksFeature(
-            osc=osc,
-            pishock=pishock,
-            server=server,
-            logger=logs.get_logger("tricks_feature.log"),
-        ),
-        ScoldingFeature(
-            osc=osc,
-            pishock=pishock,
-            server=server,
-            logger=logs.get_logger("scolding_feature.log"),
-        ),
-    ]
+    pet_context = FeatureContext(
+        role="pet",
+        osc=osc,
+        pishock=pishock,
+        whisper=whisper,
+        server=server,
+        log_manager=logs,
+        settings=pet_settings,
+    )
+
+    features: List[Any] = build_features_for_role("pet", pet_context)
 
     for feature in features:
         if hasattr(feature, "start"):
@@ -574,20 +494,21 @@ def update_trainer_feature_states(trainer_settings: dict) -> None:
 
     # Refresh scolding words for the running trainer scolding feature.
     scolding_words = trainer_settings.get("scolding_words")
+    scolding_cls = next(
+        (definition.trainer_cls for definition in feature_definitions() if definition.key == "feature_scolding"),
+        None,
+    )
     for feature in runtime.features:
-        if isinstance(feature, TrainerScoldingFeature):
+        if scolding_cls is not None and isinstance(feature, scolding_cls):
             feature.set_scolding_words(scolding_words)
             break
 
-    _apply_feature_flags(
-        runtime.features,
-        {
-            TrainerFocusFeature: bool(trainer_settings.get("feature_focus")),
-            TrainerProximityFeature: bool(trainer_settings.get("feature_proximity")),
-            TrainerTricksFeature: bool(trainer_settings.get("feature_tricks")),
-            TrainerScoldingFeature: bool(trainer_settings.get("feature_scolding")),
-        },
-    )
+    feature_flags = {
+        definition.trainer_cls: bool(trainer_settings.get(definition.key))
+        for definition in feature_definitions()
+        if definition.trainer_cls is not None
+    }
+    _apply_feature_flags(runtime.features, feature_flags)
 
 
 def stop_trainer() -> None:
@@ -619,14 +540,6 @@ def start_pet(pet_settings: dict, input_device: Optional[str]) -> None:
         stop_pet()
 
     _pet_runtime = _build_pet_interfaces(pet_settings, input_device)
-
-
-def update_pet_feature_states(pet_settings: dict) -> None:
-    """Update pet feature enablement without restarting services."""
-    # Pet runtime feature states are now driven exclusively by the
-    # trainer configs delivered via the server. This method remains as a
-    # no-op to preserve API compatibility with the UI layer.
-    return None
 
 
 def stop_pet() -> None:

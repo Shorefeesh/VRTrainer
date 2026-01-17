@@ -1,38 +1,25 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
-from typing import Optional, Dict, List
+from typing import Dict, List
 
-from interfaces.pishock import PiShockInterface
-from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.server import RemoteServerInterface
-from logic.logging_utils import LogFile
+from logic.feature import PetFeature
 
 
-class FocusFeature:
+class FocusFeature(PetFeature):
     """Pet focus feature.
 
     Runs on the pet client, reading OSC eye-contact parameters and
     delivering shocks locally when focus drops too low.
     """
 
+    feature_name = "focus"
+
     def __init__(
         self,
-        osc: VRChatOSCInterface,
-        pishock: PiShockInterface,
-        server: RemoteServerInterface | None = None,
-        logger: LogFile | None = None,
+        **kwargs,
     ) -> None:
-        self.osc = osc
-        self.pishock = pishock
-        self.server = server
-        self._logger = logger
-        self._running = False
-
-        import threading
-
-        self._thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
+        super().__init__(**kwargs)
 
         self._state_by_trainer: Dict[str, _TrainerFocusState] = {}
 
@@ -42,61 +29,28 @@ class FocusFeature:
         self._drain_rate: float = 0.02
         self._shock_threshold: float = 0.2
 
-        self._base_cooldown_seconds: float = 5.0
-
-        self._base_shock_strength_min: float = 20.0
-        self._base_shock_strength_max: float = 80.0
-        self._base_shock_duration: float = 0.5
         self._name_penalty: float = 0.15
 
-        self._log("event=init feature=focus runtime=pet")
-
     def start(self) -> None:
-        if self._running:
-            return
-
-        self._running = True
-        self._stop_event.clear()
-
-        import threading
-
-        thread = self._thread = threading.Thread(
-            target=self._worker_loop,
-            name="PetFocusFeature",
-            daemon=True,
-        )
-        thread.start()
-
-        self._log("event=start feature=focus runtime=pet")
+        self._start_worker(target=self._worker_loop, name="PetFocusFeature")
 
     def stop(self) -> None:
-        if not self._running:
-            return
-
-        self._running = False
-        self._stop_event.set()
-
-        thread = self._thread
-        if thread is not None:
-            thread.join(timeout=1.0)
-        self._thread = None
-
-        self._log("event=stop feature=focus runtime=pet")
+        self._stop_worker()
 
     # Internal helpers -------------------------------------------------
     def _worker_loop(self) -> None:
         import time
 
         while not self._stop_event.is_set():
+            if not self._has_active_trainer():
+                if self._stop_event.wait(self._poll_interval):
+                    break
+                continue
+
             now = time.time()
 
             active_configs = self._active_trainer_configs()
             self._prune_inactive_states(active_configs)
-
-            if not active_configs:
-                if self._stop_event.wait(self._poll_interval):
-                    break
-                continue
 
             penalties = self._collect_focus_events()
 
@@ -116,17 +70,6 @@ class FocusFeature:
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def _active_trainer_configs(self) -> Dict[str, dict]:
-        server = self.server
-        if server is None:
-            return {}
-
-        raw_configs = getattr(server, "latest_settings_by_trainer", None)
-        configs = raw_configs() if callable(raw_configs) else raw_configs
-        if not isinstance(configs, dict):
-            configs = {}
-        return {tid: cfg for tid, cfg in configs.items() if cfg.get("feature_focus")}
-
     def _prune_inactive_states(self, active_configs: Dict[str, dict]) -> None:
         for trainer_id in list(self._state_by_trainer.keys()):
             if trainer_id not in active_configs:
@@ -136,7 +79,7 @@ class FocusFeature:
         if self.server is None:
             return {}
 
-        events = self.server.poll_feature_events("focus", limit=10)
+        events = self.server.poll_feature_events(self.feature_name, limit=10)
 
         grouped: Dict[str, List[dict]] = {}
         for event in events:
@@ -169,34 +112,22 @@ class FocusFeature:
 
     def _deliver_correction(self, trainer_id: str, state: "_TrainerFocusState", config: dict) -> None:
         try:
-            shock_min, shock_max, shock_duration = self._shock_params(config)
+            shock_min, shock_max, shock_duration = self._shock_params_range(config)
             deficit = (self._shock_threshold - state.focus_meter) / self._shock_threshold
             strength = max(shock_min, min(shock_max, int(deficit * shock_max)))
             self.pishock.send_shock(strength=strength, duration=shock_duration)
             self._log(
                 f"event=shock feature=focus runtime=pet trainer={trainer_id[:8]} meter={state.focus_meter:.3f} threshold={self._shock_threshold:.3f} strength={strength}"
             )
-            self._send_stats(
+            self._send_logs(
                 {
                     "event": "shock",
-                    "runtime": "pet",
-                    "feature": "focus",
                     "meter": state.focus_meter,
                     "threshold": self._shock_threshold,
                     "strength": strength,
                 },
-                target_client=trainer_id,
+                target_clients=[trainer_id],
             )
-        except Exception:
-            return
-
-    def _log(self, message: str) -> None:
-        logger = self._logger
-        if logger is None:
-            return
-
-        try:
-            logger.log(message)
         except Exception:
             return
 
@@ -208,69 +139,14 @@ class FocusFeature:
         self._log(
             f"event=sample feature=focus runtime=pet trainer={trainer_id[:8]} meter={state.focus_meter:.3f} threshold={self._shock_threshold:.3f}"
         )
-        self._send_stats(
+        self._send_logs(
             {
                 "event": "sample",
-                "runtime": "pet",
-                "feature": "focus",
                 "meter": state.focus_meter,
                 "threshold": self._shock_threshold,
             },
-            target_client=trainer_id,
+            target_clients=[trainer_id],
         )
-
-    @staticmethod
-    def _normalise(text: str) -> str:
-        if not text:
-            return ""
-
-        chars: list[str] = []
-        for ch in text.lower():
-            if ch.isalnum():
-                chars.append(ch)
-            elif ch.isspace():
-                chars.append(" ")
-            else:
-                chars.append(" ")
-
-        return " ".join("".join(chars).split())
-
-    def _send_stats(self, stats: dict[str, object], *, target_client: str | None = None, broadcast_trainers: bool | None = None) -> None:
-        server = self.server
-        if server is None:
-            return
-
-        try:
-            server.send_logs(stats, target_clients=[target_client] if target_client else None, broadcast_trainers=broadcast_trainers)
-        except Exception:
-            return
-
-    def _shock_params(self, config: dict) -> tuple[float, float, float]:
-        scaling = self._scaling_from_config(config)
-        shock_min = max(0.0, self._base_shock_strength_min * scaling["strength_scale"])
-        shock_max = max(shock_min, self._base_shock_strength_max * scaling["strength_scale"])
-        shock_duration = max(0.0, self._base_shock_duration * scaling["duration_scale"])
-        return shock_min, shock_max, shock_duration
-
-    def _cooldown_seconds(self, config: dict) -> float:
-        scaling = self._scaling_from_config(config)
-        return max(0.0, self._base_cooldown_seconds * scaling["cooldown_scale"])
-
-    @staticmethod
-    def _scaling_from_config(config: dict) -> dict[str, float]:
-        def _safe(key: str) -> float:
-            try:
-                val = float(config.get(key, 1.0))
-            except Exception:
-                val = 1.0
-            return max(0.0, min(2.0, val))
-
-        return {
-            "delay_scale": _safe("delay_scale"),
-            "cooldown_scale": _safe("cooldown_scale"),
-            "duration_scale": _safe("duration_scale"),
-            "strength_scale": _safe("strength_scale"),
-        }
 
 
 @dataclass

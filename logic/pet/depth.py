@@ -2,42 +2,26 @@ from __future__ import annotations
 
 import threading
 
-from interfaces.pishock import PiShockInterface
-from interfaces.vrchatosc import VRChatOSCInterface
-from interfaces.server import RemoteServerInterface
-from logic.logging_utils import LogFile
+from logic.feature import PetFeature
 
 
-class DepthFeature:
+class DepthFeature(PetFeature):
     """Pet SPS depth feature.
 
     Uses OSC parameters to track SPS depth and PiShock to apply
     feedback when limits are exceeded.
     """
 
+    feature_name = "depth"
+
     def __init__(
         self,
-        osc: VRChatOSCInterface,
-        pishock: PiShockInterface,
-        server: RemoteServerInterface | None = None,
-        logger: LogFile | None = None,
+        **kwargs,
     ) -> None:
-        self.osc = osc
-        self.pishock = pishock
-        self.server = server
-        self._logger = logger
-        self._running = False
+        super().__init__(**kwargs)
 
-        # Background worker that polls OSC parameters.
-        self._thread: threading.Thread | None = None
-        self._stop_event = threading.Event()
-
-        # Simple configuration – can be made user-adjustable later.
-        # Depth values are floats in the 0–1 range.
         self._depth_threshold: float = 0.5
         self._poll_interval: float = 0.1
-        self._cooldown_seconds: float = 1
-        self._cooldown_until: float = 0.0
 
         self._shock_strength_min: float = 20.0
         self._shock_strength_max: float = 40.0
@@ -45,38 +29,11 @@ class DepthFeature:
         # Parameter base names for depth receivers.
         self._targets = ("Trainer/PenDepth")
 
-        self._log("event=init feature=depth")
-
     def start(self) -> None:
-        if self._running:
-            return
-
-        self._running = True
-        self._stop_event.clear()
-
-        thread = threading.Thread(
-            target=self._worker_loop,
-            name="PetDepthFeature",
-            daemon=True,
-        )
-        self._thread = thread
-        thread.start()
-
-        self._log("event=start feature=depth")
+        self._start_worker(target=self._worker_loop, name="PetDepthFeature")
 
     def stop(self) -> None:
-        if not self._running:
-            return
-
-        self._running = False
-        self._stop_event.set()
-
-        thread = self._thread
-        if thread is not None:
-            thread.join(timeout=1.0)
-        self._thread = None
-
-        self._log("event=stop feature=depth")
+        self._stop_worker()
 
     # Internal helpers -------------------------------------------------
     def _worker_loop(self) -> None:
@@ -99,17 +56,6 @@ class DepthFeature:
 
             if self._stop_event.wait(self._poll_interval):
                 break
-
-    def _has_active_trainer(self) -> bool:
-        server = self.server
-        if server is None:
-            return False
-
-        raw_configs = getattr(server, "latest_settings_by_trainer", None)
-        configs = raw_configs() if callable(raw_configs) else raw_configs
-        if not isinstance(configs, dict):
-            configs = {}
-        return any(cfg.get("feature_depth") for cfg in configs.values())
 
     def _check_and_maybe_shock(self, now: float) -> bool:
         """Return True if a shock was sent based on current parameters."""
@@ -136,14 +82,4 @@ class DepthFeature:
             )
         except Exception:
             # Never let PiShock errors break the feature loop.
-            return
-
-    def _log(self, message: str) -> None:
-        logger = self._logger
-        if logger is None:
-            return
-
-        try:
-            logger.log(message)
-        except Exception:
             return
