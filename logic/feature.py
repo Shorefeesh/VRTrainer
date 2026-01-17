@@ -148,7 +148,13 @@ class Feature:
 
         if not isinstance(configs, dict):
             return {}
-        return {cid: cfg for cid, cfg in configs.items() if isinstance(cfg, dict)}
+
+        clean_configs: dict[str, dict] = {}
+        for cid, cfg in configs.items():
+            if isinstance(cfg, dict):
+                clean_configs[str(cid)] = dict(cfg)
+
+        return clean_configs
 
     def _extract_word_list(self, config: dict, key: str) -> list[str]:
         values = config.get(key) if isinstance(config, dict) else None
@@ -167,7 +173,13 @@ class Feature:
         configs = raw_configs() if callable(raw_configs) else raw_configs
         if not isinstance(configs, dict):
             return {}
-        return configs
+
+        clean_configs: dict[str, dict] = {}
+        for trainer_id, cfg in configs.items():
+            if isinstance(cfg, dict):
+                clean_configs[str(trainer_id)] = dict(cfg)
+
+        return clean_configs
 
     # Scaling helpers ---------------------------------------------------
     @staticmethod
@@ -227,7 +239,7 @@ class Feature:
     def _send_logs(self, stats: dict[str, object], *, target_clients: str | None = None, broadcast_trainers: bool | None = None) -> None:
         stats["role"] = self.role
         stats["feature"] = self.feature_name
-        self.server.send_logs(stats, target_clients, broadcast_trainers)
+        self.server.send_logs(stats, target_clients=target_clients, broadcast_trainers=broadcast_trainers)
 
 
 class TrainerFeature(Feature):
@@ -247,10 +259,14 @@ class TrainerFeature(Feature):
 
     def _has_active_pet(self) -> bool:
         configs = self._latest_trainer_settings()
+        if not configs:
+            return False
+
         flag = self.feature_name
         if not flag:
-            return configs
-        return any(tid for tid, cfg in configs.items() if cfg.get(flag))
+            return True
+
+        return any(bool(cfg.get(flag)) for cfg in configs.values())
 
 
 class TrainerCommandFeature(TrainerFeature):
@@ -298,18 +314,18 @@ class TrainerCommandFeature(TrainerFeature):
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def _detect_command(self, text: str, cfg: list[str]) -> str | None:
+    def _detect_command(self, text: str, cfg: dict) -> str | None:
         if not text:
             return None
 
-        normalised = self.normalize_text(text)
+        normalised = self.normalise_text(text)
         if not normalised:
             return None
 
         if self._require_name:
             names = self._extract_word_list(cfg, "names")
             recent_chunks = self.whisper.get_recent_text_chunks(count=3)
-            recent_normalised = " ".join(self.normalize_list(recent_chunks))
+            recent_normalised = " ".join(self.normalise_list(recent_chunks))
             if not any(name in recent_normalised for name in names):
                 return None
 
@@ -324,7 +340,7 @@ class TrainerCommandFeature(TrainerFeature):
                     return cmd
 
         if self._send_default:
-            return cmd
+            return self.feature_name
 
         return None
 

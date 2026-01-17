@@ -177,4 +177,4 @@ class ProximityFeature(PetFeature):
                 "proximity": proximity_value,
                 "threshold": self._proximity_threshold,
             }
-        self._send_logs(stats, [self._pending_command_from])
+        self._send_logs(stats)

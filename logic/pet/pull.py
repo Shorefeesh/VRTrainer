@@ -40,7 +40,7 @@ class PullFeature(PetFeature):
 
             now = time.time()
 
-            config = self._active_trainer_configs().values()[0]
+            config = list(self._active_trainer_configs().values())[0]
 
             if now >= self._cooldown_until:
                 if self._check_and_maybe_shock(now, config):
