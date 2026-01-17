@@ -27,6 +27,7 @@ class Feature:
     ui_label: Optional[str] = None
     role: str = "shared"
     feature_name: str = ""
+    option_handlers: Dict[str, Callable[[str], None]] = {}
 
     def __init__(
         self,
@@ -160,6 +161,10 @@ class Feature:
         values = config.get(key) if isinstance(config, dict) else None
         return self.normalise_list(values)
 
+    @property
+    def option_config_key(self) -> str | None:
+        return f"{self.feature_name}_option"
+
     def _latest_trainer_settings(self) -> Dict[str, dict]:
         configs = self._config_map()
         if configs:
@@ -266,7 +271,7 @@ class TrainerFeature(Feature):
         if not flag:
             return True
 
-        return any(bool(cfg.get(flag)) for cfg in configs.values())
+        return any(bool(cfg.get(self.feature_name or flag)) for cfg in configs.values())
 
 
 class TrainerCommandFeature(TrainerFeature):
@@ -352,10 +357,7 @@ class PetFeature(Feature):
 
     def _active_trainer_configs(self) -> Dict[str, dict]:
         configs = self._latest_trainer_settings()
-        flag = self.feature_name
-        if not flag:
-            return configs
-        return {tid: cfg for tid, cfg in configs.items() if cfg.get(flag)}
+        return {tid: cfg for tid, cfg in configs.items() if cfg.get(self.feature_name)}
 
     def _has_active_trainer(self) -> bool:
         return bool(self._active_trainer_configs())
@@ -373,8 +375,9 @@ class FeatureDefinition:
     trainer_cls: Type[TrainerFeature] | None = None
     pet_cls: Type[PetFeature] | None = None
     log_name: str = None
-    show_in_ui: bool = True
     ui_column: int = 0
+    ui_dropdown: bool = False
+    show_in_ui: bool = True
     build_kwargs: FeatureKwargsBuilder | None = None
 
     def resolve_class(self, role: str) -> Type[Feature] | None:
@@ -392,6 +395,34 @@ class FeatureDefinition:
             return self.build_kwargs(role, context) or {}
         except Exception:
             return {}
+
+    @property
+    def option_key(self) -> str | None:
+        if not self.ui_dropdown:
+            return None
+        return f"{self.key}_option"
+
+    def option_values(self) -> list[str]:
+        """Return available option keys for dropdown-enabled features."""
+        if not self.ui_dropdown:
+            return []
+
+        cls: Type[Feature] | None = self.trainer_cls or self.pet_cls
+        if cls is None:
+            return []
+
+        handlers = getattr(cls, "option_handlers", None)
+        if not handlers:
+            try:
+                instance = cls()
+            except Exception:
+                instance = None
+            handlers = getattr(instance, "option_handlers", None) if instance is not None else None
+
+        if isinstance(handlers, dict):
+            return list(handlers.keys())
+
+        return []
 
     def build_feature(self, role: str, context: FeatureContext) -> Feature | None:
         cls = self.resolve_class(role)
@@ -476,18 +507,40 @@ def feature_definitions() -> List[FeatureDefinition]:
             ui_column=1,
         ),
         FeatureDefinition(
-            key="wordgame",
+            key="word_game",
             label="Word Game",
             pet_cls=WordFeature,
             log_name="wordgame_feature.log",
-            show_in_ui=False,
+            ui_column=1,
+            ui_dropdown=True,
         ),
     ]
 
 
-def feature_list() -> Dict[str, bool]:
-    """Return default enablement flags keyed by feature config key."""
+def feature_list() -> List[str]:
+    """Return feature config keys used for boolean enablement."""
     return [definition.key for definition in feature_definitions()]
+
+
+def feature_option_keys() -> List[str]:
+    """Return option config keys for dropdown-enabled features."""
+    keys: list[str] = []
+    for definition in feature_definitions():
+        option_key = definition.option_key
+        if option_key:
+            keys.append(option_key)
+    return keys
+
+
+def feature_option_defaults() -> Dict[str, str]:
+    """Return default option selections keyed by option config key."""
+    defaults: dict[str, str] = {}
+    for definition in feature_definitions():
+        option_key = definition.option_key
+        values = definition.option_values()
+        if option_key and values:
+            defaults[option_key] = values[0]
+    return defaults
 
 
 def ui_feature_definitions() -> List[FeatureDefinition]:

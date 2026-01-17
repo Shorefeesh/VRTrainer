@@ -24,10 +24,13 @@ class TrainerTab(ScrollableFrame):
         self.on_profile_selected = on_profile_selected
         self.on_profile_renamed = on_profile_renamed
         self.on_profile_deleted = on_profile_deleted
-        self._suppress_callbacks = False
+        # Suppress callbacks while constructing widgets so traces that fire during
+        # initialization (e.g., default combobox selections) don't access
+        # incomplete state.
+        self._suppress_callbacks = True
         self._detail_frames: list[ttk.Frame] = []
         self._feature_widgets: dict[str, LabeledCheckbutton] = {}
-        self._word_game_options: list[str] = ["None", "Pronouns"]
+        self._feature_option_widgets: dict[str, LabeledCombobox] = {}
 
         self._build_input_device_row(input_device_var)
         self._build_profile_section()
@@ -38,6 +41,7 @@ class TrainerTab(ScrollableFrame):
         for col in range(2):
             self.container.columnconfigure(col, weight=1)
 
+        self._suppress_callbacks = False
         self._update_profile_visibility()
 
     # Input device -------------------------------------------------------
@@ -165,25 +169,26 @@ class TrainerTab(ScrollableFrame):
         for definition in ui_feature_definitions():
             column = int(definition.ui_column or 0)
             row = feature_rows.get(column, 0)
-            widget = LabeledCheckbutton(frame, definition.label)
-            widget.grid(row=row, column=column, sticky="w")
+            row_frame = ttk.Frame(frame)
+            row_frame.grid(row=row, column=column, sticky="w", pady=2)
+
+            widget = LabeledCheckbutton(row_frame, definition.label)
+            widget.grid(row=0, column=0, sticky="w")
             widget.variable.trace_add("write", self._on_any_setting_changed)
             self._feature_widgets[definition.key] = widget
+
+            if definition.ui_dropdown:
+                option_values = definition.option_values()
+                option_widget = LabeledCombobox(row_frame, "Mode", values=option_values)
+                option_widget.grid(row=0, column=1, sticky="w", padx=(12, 0))
+                option_widget.variable.trace_add("write", self._on_any_setting_changed)
+                if option_values and not option_widget.variable.get():
+                    option_widget.variable.set(option_values[0])
+
+                option_key = definition.option_key
+                self._feature_option_widgets[option_key] = option_widget
+
             feature_rows[column] = row + 1
-
-        # Keep word game selection aligned with the combobox.
-        base_row = max(feature_rows.values() or [0])
-        ttk.Label(frame, text="Word game").grid(row=base_row, column=0, sticky="w", pady=(4, 0))
-        self.word_game_var = tk.StringVar(value=self._word_game_options[0])
-        self.word_game_combo = ttk.Combobox(
-            frame,
-            textvariable=self.word_game_var,
-            state="readonly",
-            values=self._word_game_options,
-        )
-        self.word_game_combo.grid(row=base_row, column=1, sticky="ew", pady=(4, 0))
-
-        self.word_game_var.trace_add("write", self._on_any_setting_changed)
 
     # Word lists ---------------------------------------------------------
     def _build_word_lists_section(self) -> None:
@@ -278,12 +283,11 @@ class TrainerTab(ScrollableFrame):
     def collect_settings(self) -> dict:
         """Collect the current trainer settings into a dictionary."""
         feature_settings = {key: widget.variable.get() for key, widget in self._feature_widgets.items()}
+        feature_option_settings = {key: widget.variable.get() for key, widget in self._feature_option_widgets.items()}
         return {
             "profile": self.profile_row.variable.get(),
             **feature_settings,
-            "word_game": self.word_game_var.get() or self._word_game_options[0],
-            # Keep compatibility with the existing pronouns feature by deriving it from the word game choice.
-            "feature_pronouns": (self.word_game_var.get() or "").lower() == "pronouns",
+            **feature_option_settings,
             "delay_scale": float(self.delay_scale.variable.get()),
             "cooldown_scale": float(self.cooldown_scale.variable.get()),
             "duration_scale": float(self.duration_scale.variable.get()),
@@ -301,7 +305,9 @@ class TrainerTab(ScrollableFrame):
                 # Reset to defaults if nothing is stored yet.
                 for widget in self._feature_widgets.values():
                     widget.variable.set(False)
-                self.word_game_var.set(self._word_game_options[0])
+                for option_widget in self._feature_option_widgets.values():
+                    values = list(option_widget.combobox["values"])
+                    option_widget.variable.set(values[0] if values else "")
                 self.delay_scale.variable.set(1.0)
                 self.cooldown_scale.variable.set(1.0)
                 self.duration_scale.variable.set(1.0)
@@ -318,13 +324,12 @@ class TrainerTab(ScrollableFrame):
                 for key, widget in self._feature_widgets.items():
                     widget.variable.set(bool(settings.get(key)))
 
-                word_game = settings.get("word_game") or (
-                    self._word_game_options[1] if settings.get("feature_pronouns") else self._word_game_options[0]
-                )
-                if word_game not in self._word_game_options:
-                    self._word_game_options.append(word_game)
-                    self.word_game_combo["values"] = self._word_game_options
-                self.word_game_var.set(word_game)
+                for option_key, widget in self._feature_option_widgets.items():
+                    values = list(widget.combobox["values"])
+                    value = settings.get(option_key)
+                    if value is None and values:
+                        value = values[0]
+                    widget.variable.set(value if value is not None else "")
 
                 delay_scale = settings.get("delay_scale")
                 cooldown_scale = settings.get("cooldown_scale")

@@ -21,7 +21,7 @@ class ProximityFeature(PetFeature):
     ) -> None:
         super().__init__(**kwargs)
 
-        self._pending_command_from: str = ""
+        self._pending_command_from: str = None
 
         self._poll_interval: float = 0.1
         self._proximity_threshold: float = 0.4
@@ -69,11 +69,9 @@ class ProximityFeature(PetFeature):
                         target_clients=[trainer_id],
                     )
 
-                if self._command_until is not None:
+                if self._pending_command_from is not None:
                     if self._meets_command_target(proximity_value):
                         self._command_until = None
-                        trainer_target = self._pending_command_from
-                        self._pending_command_from = None
                         self._log(
                             f"summon_success trainer={trainer_id[:8]} proximity={proximity_value:.3f}"
                         )
@@ -83,20 +81,20 @@ class ProximityFeature(PetFeature):
                                 "name": "summon",
                                 "proximity": proximity_value,
                             },
-                            target_clients=[trainer_target],
+                            target_clients=[self._pending_command_from],
                         )
-                    elif now >= self._command_until and now >= self._cooldown_until:
-                        trainer_target = self._pending_command_from
                         self._pending_command_from = None
+                    elif now >= self._command_until and now >= self._cooldown_until:
                         self._deliver_correction(
                             trainer_id,
                             config,
                             "summon command missed",
                             proximity_value,
-                            target_client=trainer_target,
+                            target_client=self._pending_command_from,
                         )
                         self._cooldown_until = now + self._scaled_cooldown(config)
                         self._command_until = None
+                        self._pending_command_from = None
 
                 if now >= self._cooldown_until and proximity_value <= self._proximity_threshold:
                     self._deliver_correction(
