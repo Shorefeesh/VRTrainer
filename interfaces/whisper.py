@@ -130,7 +130,7 @@ class WhisperInterface:
 
                 backend_label = self._format_backend_label(device, compute_type)
 
-                _SHARED_WHISPER_MODEL = WhisperModel("small", **kwargs)
+                _SHARED_WHISPER_MODEL = WhisperModel("medium", **kwargs)
                 _SHARED_WHISPER_BACKEND = backend_label
 
             elif _SHARED_WHISPER_BACKEND is None:
