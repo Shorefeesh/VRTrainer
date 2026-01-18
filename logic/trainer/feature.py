@@ -52,8 +52,9 @@ class TrainerCommandFeature(TrainerFeature):
 
             text = self.whisper.get_new_text(self.feature_name)
 
-            pet_configs = self._config_map()
-            if pet_configs and text:
+            if text:
+                pet_configs = self._config_map()
+
                 for pet_id, cfg in pet_configs.items():
                     if not cfg.get(self.feature_name):
                         continue

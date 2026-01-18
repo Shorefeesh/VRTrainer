@@ -24,10 +24,7 @@ class TricksFeature(PetFeature):
         super().__init__(**kwargs)
 
         self._base_delay_seconds: float = 10.0
-
         self._active_command: str = None
-
-        self._log("init")
 
     def start(self) -> None:
         self._start_worker(target=self._worker_loop, name="PetTricksFeature")
@@ -46,18 +43,18 @@ class TricksFeature(PetFeature):
             now = time.time()
 
             active_configs = self._active_trainer_configs()
-            command_events = self._collect_trick_events()
+            command_events = self._collect_events()
 
             for trainer_id, config in active_configs.items():
                 if self._active_command is None and command_events.get(trainer_id):
-                    self._maybe_start_command(now, command_events[trainer_id][0], config, trainer_id)
+                    self._start_command(now, command_events[trainer_id][0], config, trainer_id)
 
                 if self._active_command is not None:
                     if self._is_command_completed():
                         self._log(
                             f"command_success trainer={trainer_id[:8]} trick={self._active_command} remaining={self._delay_until - now}"
                         )
-                        self._deliver_completion_signal()
+                        self._deliver_task_completion_signal(config=config, trainer_id=trainer_id)
                         self._active_command = None
                     elif now >= self._delay_until:
                         self._deliver_shock_single(config=config, reason=self._active_command, trainer_id=trainer_id)
@@ -65,31 +62,12 @@ class TricksFeature(PetFeature):
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def _collect_trick_events(self) -> Dict[str, List[dict]]:
-        if self.server is None:
-            return {}
-
-        events = self.server.poll_feature_events(self.feature_name, limit=10)
-
-        grouped: Dict[str, List[dict]] = {}
-        for event in events:
-            trainer_id = str(event.get("from_client") or "")
-            if trainer_id:
-                grouped.setdefault(trainer_id, []).append(event)
-        return grouped
-
-    def _maybe_start_command(self, now: float, event: dict, config: dict, trainer_id: str) -> None:
-        payload = event.get("payload", {})
-        command = payload.get("command")
-        if not command:
-            return
-
-        normalised = self.normalise_text(str(command))
-
-        self._active_command = normalised,
+    def _start_command(self, now: float, event: dict, config: dict, trainer_id: str) -> None:
+        command = event.get("payload").get("command")
+        self._active_command = command,
         self._delay_until = now + self._scaled_delay(config)
-        self._log(f"command_start trainer={trainer_id[:8]} trick={normalised}")
-        self._deliver_task_start_signal()
+        self._log(f"command_start trainer={trainer_id[:8]} trick={command}")
+        self._deliver_task_start_signal(config, trainer_id)
 
     def _is_command_completed(self) -> bool:
         command = self._active_command
@@ -145,13 +123,11 @@ class TricksFeature(PetFeature):
 
         return False
 
-    def _deliver_task_start_signal(self) -> None:
-        self.pishock.send_vibrate(strength=10, duration=0.2)
-        self._log("task_start_vibrate strength=10")
+    def _deliver_task_start_signal(self, config: dict, trainer_id: str) -> None:
+        self._deliver_vibrate_single(config=config, reason="task_start", trainer_id=trainer_id)
 
-    def _deliver_completion_signal(self) -> None:
+    def _deliver_task_completion_signal(self, config: dict, trainer_id: str) -> None:
         for pulse in (1, 2):
-            self.pishock.send_vibrate(strength=10, duration=0.2)
-            self._log(f"task_complete_vibrate pulse={pulse} strength=10")
+            self._deliver_vibrate_single(config=config, reason=f"task_complete_pulse{pulse}", trainer_id=trainer_id)
             if pulse == 1:
                 time.sleep(0.2)

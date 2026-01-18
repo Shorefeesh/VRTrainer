@@ -336,11 +336,13 @@ def feature_definitions() -> List[FeatureDefinition]:
     from logic.pet.forbidden import ForbiddenWordsFeature
     from logic.pet.proximity import ProximityFeature
     from logic.pet.pull import PullFeature
+    from logic.pet.remote import RemoteFeature
     from logic.pet.scolding import ScoldingFeature
     from logic.pet.tricks import TricksFeature
     from logic.pet.wordgame import WordFeature
     from logic.trainer.focus import TrainerFocusFeature
     from logic.trainer.proximity import TrainerProximityFeature
+    from logic.trainer.remote import TrainerRemoteFeature
     from logic.trainer.scolding import TrainerScoldingFeature
     from logic.trainer.tricks import TrainerTricksFeature
 
@@ -365,6 +367,14 @@ def feature_definitions() -> List[FeatureDefinition]:
             trainer_cls=TrainerTricksFeature,
             pet_cls=TricksFeature,
             log_name="tricks_feature.log",
+        ),
+        FeatureDefinition(
+            key="remote",
+            label="Remote Control",
+            trainer_cls=TrainerRemoteFeature,
+            pet_cls=RemoteFeature,
+            log_name="remote_feature.log",
+            ui_column=1,
         ),
         FeatureDefinition(
             key="scolding",

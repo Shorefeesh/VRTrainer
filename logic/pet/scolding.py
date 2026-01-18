@@ -32,7 +32,7 @@ class ScoldingFeature(PetFeature):
 
             active_configs = self._active_trainer_configs()
 
-            events_by_trainer = self._collect_scold_events()
+            events_by_trainer = self._collect_events()
 
             for trainer_id, config in active_configs.items():
                 if events_by_trainer.get(trainer_id):
@@ -40,16 +40,3 @@ class ScoldingFeature(PetFeature):
 
             if self._stop_event.wait(self._poll_interval):
                 break
-
-    def _collect_scold_events(self) -> Dict[str, List[dict]]:
-        if self.server is None:
-            return {}
-
-        events = self.server.poll_feature_events(self.feature_name, limit=10)
-
-        grouped: Dict[str, List[dict]] = {}
-        for event in events:
-            trainer_id = str(event.get("from_client") or "")
-            if trainer_id:
-                grouped.setdefault(trainer_id, []).append(event)
-        return grouped

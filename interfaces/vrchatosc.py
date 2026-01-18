@@ -2,6 +2,11 @@ from __future__ import annotations
 
 from typing import Callable, Iterable
 
+from pythonosc.dispatcher import Dispatcher
+from pythonosc.osc_server import ThreadingOSCUDPServer
+
+import threading
+
 
 class VRChatOSCInterface:
     """Interface to VRChat OSC parameters.
@@ -14,7 +19,6 @@ class VRChatOSCInterface:
 
     def __init__(
         self,
-        log_all_events: Callable[[str], None] | None = None,
         log_relevant_events: Callable[[str], None] | None = None,
         *,
         role: str = "pet",
@@ -30,12 +34,10 @@ class VRChatOSCInterface:
         # Only the pet runtime should attach to VRChat OSC. The trainer
         # receives data through the server instead of binding a local
         # OSC port.
-        self._role = "pet" if role == "pet" else "trainer"
-        self._enabled = self._role == "pet"
+        self._role = role
 
         self._lock = threading.Lock()
         self._message_times = deque()
-        self._trainer_params_seen: set[str] = set()
         self._expected_trainer_params:  set[str] = {
             "Trainer/Menu/Shock",
             "Trainer/Menu/Vibrate",
@@ -47,7 +49,6 @@ class VRChatOSCInterface:
             "Trainer/EyeFarLeft",
             "Trainer/EyeRight",
             "Trainer/EyeFarRight",
-            "Trainer/Paw",
             "Trainer/HipsFloorMin",
             "Trainer/HipsFloorMax",
             "Trainer/HeadFloorMin",
@@ -84,21 +85,6 @@ class VRChatOSCInterface:
         """Start OSC handling and begin listening on localhost:9001."""
         if self._running:
             return
-
-        if not self._enabled:
-            # Trainer side: skip binding the OSC server entirely.
-            self._running = False
-            self._log_message(self._log_relevant_events, "OSC listener disabled on trainer runtime")
-            return
-
-        try:
-            from pythonosc.dispatcher import Dispatcher
-            from pythonosc.osc_server import ThreadingOSCUDPServer
-        except Exception:
-            self._running = False
-            return
-
-        import threading
 
         dispatcher = Dispatcher()
         dispatcher.map("/*", self._on_osc_message)
@@ -218,11 +204,6 @@ class VRChatOSCInterface:
                 self._param_values[param_name] = value
                 is_relevant_param = self._is_relevant_param(param_name)
 
-            prefix = "/avatar/parameters/Trainer/"
-            if address.startswith(prefix):
-                trainer_suffix = address[len("/avatar/parameters/") :]
-                self._trainer_params_seen.add(trainer_suffix)
-
         self._log_osc_message(address, values, is_relevant_param)
 
     # Public diagnostics -----------------------------------------------
@@ -239,19 +220,18 @@ class VRChatOSCInterface:
             messages_last_10s = len(self._message_times)
 
             expected_trainer = set(self._expected_trainer_params)
-            seen_trainer = set(self._trainer_params_seen)
+            seen_trainer = {name for name in self._param_values.keys() if name in expected_trainer}
 
             expected_pet = set(self._expected_pet_params)
             seen_pet = {name for name in self._param_values.keys() if name in expected_pet}
 
-        found_trainer = len(expected_trainer & seen_trainer)
+        found_trainer = len(seen_trainer)
         missing_trainer = sorted(expected_trainer - seen_trainer)
 
         found_pet = len(seen_pet)
         missing_pet = sorted(expected_pet - seen_pet)
 
         return {
-            "enabled": self._enabled,
             "messages_last_10s": messages_last_10s,
             "expected_trainer_params_total": len(expected_trainer),
             "found_trainer_params": found_trainer,
@@ -260,10 +240,6 @@ class VRChatOSCInterface:
             "found_pet_params": found_pet,
             "missing_pet_params": missing_pet,
         }
-
-    @property
-    def is_running(self) -> bool:
-        return self._enabled and self._running
 
     # Parameter access -------------------------------------------------
     def get_parameter(self, name: str, default: object | None = None) -> object | None:

@@ -38,17 +38,19 @@ All items relevant to trainer role.
     [] `Proximity`
     [] `Tricks`
     [] `Tricks (SPS)`
-    [] `Scolding words`
-    [] `Forbidden words`
-    [] `Word game` {select}
+    [] `Scolding Words`
+    [] `Forbidden Words`
+    [] `Word Game` {select}
     [] `Ear/Tail Pull`
+    [] `Depth`
+    [] `Remote Control`
 
   `Word Lists`
     `Names (one per line)` | `Scolding (one per line)` | `Forbidden (one per line)`
     {text box} | {text box} | {text box}
 
   `Difficulty`
-    `Countdown` {slider} | `Cooldown` {slider}
+    `Delay` {slider} | `Cooldown` {slider}
     `Duration` {slider}  | `Strength` {slider}
 
 
@@ -91,7 +93,7 @@ All items relevant to multiplayer sessions.
     `User` | `Role` | `VRChat OSC` | `PiShock` | `Whisper` | `Profile`
     User:str
     Role:enum("Trainer", "Pet")
-    VRChat OSC:if(role==trainer) str("Not used") else str("Message count {int}. Pet parameters seen {int}/{int})
+    VRChat OSC:if(role==trainer) str("Message count {int}. Trainer parameters seen {int}/{int}) else str("Message count {int}. Pet parameters seen {int}/{int})
     PiShock: if(role==trainer) str("Not used") else enum("Not configured", "Not connected", "Connected")
     Whisper: enum("Not connected", "CPU", "GPU")
     Profile: if(role==trainer) str("Not used") else {select}

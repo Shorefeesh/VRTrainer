@@ -137,12 +137,12 @@ def build_ui(root: tk.Tk) -> None:
     def _start_trainer_runtime() -> None:
         trainer_settings = trainer_tab.collect_settings()
         input_device = trainer_tab.input_device
-        services.start_trainer(trainer_settings, input_device)
+        services.start_runtime("trainer", trainer_settings, input_device)
 
     def _start_pet_runtime() -> None:
         pet_settings = pet_tab.collect_settings()
         input_device = pet_tab.input_device
-        services.start_pet(pet_settings, input_device)
+        services.start_runtime("pet", pet_settings, input_device)
 
     def runtime_status_provider(role: str | None) -> dict[str, str]:
         running = services.is_running()

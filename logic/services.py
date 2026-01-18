@@ -324,17 +324,24 @@ def get_server_session_details() -> dict:
     return details
 
 
-def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str]) -> Runtime:
-    logs = SessionLogManager("trainer")
+def _build_interfaces(role: str, settings: dict, input_device: Optional[str]) -> Runtime:
+    logs = SessionLogManager(role)
 
     osc = VRChatOSCInterface(
-        log_all_events=logs.get_logger("osc_all.log").log,
         log_relevant_events=logs.get_logger("osc_relevant.log").log,
-        role="trainer",
+        role=role,
     )
 
-    # Trainer mode keeps PiShock disabled; credentials are no longer collected on the trainer tab.
-    pishock = PiShockInterface(username="", api_key="", share_code="", role="trainer", osc=osc)
+    if role == "trainer":
+        pishock = PiShockInterface(username="", api_key="", share_code="", role=role, osc=osc)
+    else:
+        pishock = PiShockInterface(
+            username=settings.get("pishock_username") or "",
+            api_key=settings.get("pishock_api_key") or "",
+            share_code=settings.get("pishock_share_code") or "",
+            role=role,
+            osc=osc,
+        )
 
     whisper = WhisperInterface(input_device=input_device)
 
@@ -342,18 +349,29 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
     osc.start()
     pishock.start()
     whisper.start()
-    server = _ensure_server(role="trainer")
+    server = _ensure_server(role=role)
 
-    trainer_context = FeatureContext(
-        role="trainer",
-        osc=osc,
-        pishock=pishock,
-        whisper=whisper,
-        server=server,
-        log_manager=logs,
-        config_provider=get_assigned_pet_configs,
-    )
-    features: List[Any] = build_features_for_role("trainer", trainer_context)
+    if role == "trainer":
+        context = FeatureContext(
+            role=role,
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            server=server,
+            log_manager=logs,
+            config_provider=get_assigned_pet_configs,
+        )
+    else:
+        context = FeatureContext(
+            role=role,
+            osc=osc,
+            pishock=pishock,
+            whisper=whisper,
+            server=server,
+            log_manager=logs,
+        )
+
+    features: List[Any] = build_features_for_role(role, context)
 
     for feature in features:
         if hasattr(feature, "start"):
@@ -364,54 +382,10 @@ def _build_trainer_interfaces(trainer_settings: dict, input_device: Optional[str
     return Runtime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
 
 
-def _build_pet_interfaces(pet_settings: dict, input_device: Optional[str]) -> Runtime:
-    logs = SessionLogManager("pet")
-
-    osc = VRChatOSCInterface(
-        log_all_events=logs.get_logger("osc_all.log").log,
-        log_relevant_events=logs.get_logger("osc_relevant.log").log,
-        role="pet",
-    )
-
-    pishock = PiShockInterface(
-        username=pet_settings.get("pishock_username") or "",
-        api_key=pet_settings.get("pishock_api_key") or "",
-        share_code=pet_settings.get("pishock_share_code") or "",
-        role="pet",
-        osc=osc,
-    )
-
-    whisper = WhisperInterface(input_device=input_device)
-
-    osc.start()
-    pishock.start()
-    whisper.start()
-
-    server = _ensure_server(role="pet")
-
-    pet_context = FeatureContext(
-        role="pet",
-        osc=osc,
-        pishock=pishock,
-        whisper=whisper,
-        server=server,
-        log_manager=logs,
-    )
-
-    features: List[Any] = build_features_for_role("pet", pet_context)
-
-    for feature in features:
-        if hasattr(feature, "start"):
-            feature.start()
-
-    return Runtime(osc=osc, pishock=pishock, whisper=whisper, logs=logs, features=features)
-
-
-def start_trainer(trainer_settings: dict, input_device: Optional[str]) -> None:
+def start_runtime(role: str, trainer_settings: dict, input_device: Optional[str]) -> None:
     """Launch all interfaces and construct feature instances for enabled features.
 
-    This function is intended to be called when the Trainer tab's Start
-    button is pressed.
+    This function is intended to be called when joining a Session.
     """
     global _runtime
 
@@ -419,17 +393,7 @@ def start_trainer(trainer_settings: dict, input_device: Optional[str]) -> None:
     if _runtime is not None:
         stop_runtime()
 
-    _runtime = _build_trainer_interfaces(trainer_settings, input_device)
-
-
-def start_pet(pet_settings: dict, input_device: Optional[str]) -> None:
-    """Launch all interfaces and construct feature instances for enabled pet features."""
-    global _runtime
-
-    if _runtime is not None:
-        stop_runtime()
-
-    _runtime = _build_pet_interfaces(pet_settings, input_device)
+    _runtime = _build_interfaces(role, trainer_settings, input_device)
 
 
 def stop_runtime() -> None:

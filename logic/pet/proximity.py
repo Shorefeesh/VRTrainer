@@ -46,7 +46,7 @@ class ProximityFeature(PetFeature):
 
             active_configs = self._active_trainer_configs()
 
-            summon_events = self._collect_remote_summons()
+            summon_events = self._collect_events()
 
             proximity_value = self.osc.get_float_param("Trainer/Proximity", default=1.0)
 
@@ -77,16 +77,3 @@ class ProximityFeature(PetFeature):
 
             if self._stop_event.wait(self._poll_interval):
                 break
-
-    def _collect_remote_summons(self) -> Dict[str, List[dict]]:
-        if self.server is None:
-            return {}
-
-        events = self.server.poll_feature_events("proximity", limit=10)
-
-        grouped: Dict[str, List[dict]] = {}
-        for event in events:
-            trainer_id = str(event.get("from_client") or "")
-            if trainer_id:
-                grouped.setdefault(trainer_id, []).append(event)
-        return grouped

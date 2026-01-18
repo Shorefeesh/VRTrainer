@@ -13,15 +13,17 @@ def format_osc_status(role: str, snapshot: dict | None) -> str:
     if snapshot is None:
         return "No data"
 
-    # Trainer never listens to OSC locally; match PiShock wording.
-    if role == "trainer" or not snapshot.get("enabled", False):
-        return "Not used"
-
     messages = snapshot.get("messages_last_10s", 0)
-    pet_expected = snapshot.get("expected_pet_params_total", 0) or 0
-    pet_found = snapshot.get("found_pet_params", 0) or 0
 
-    return f"msgs_last_10s={messages}; pet_params={pet_found}/{pet_expected}"
+    if role == "trainer" :
+        trainer_expected = snapshot.get("expected_trainer_params_total", 0) or 0
+        trainer_found = snapshot.get("found_trainer_params", 0) or 0
+        return f"msgs_last_10s={messages}; trainer_params={trainer_found}/{trainer_expected}"
+
+    else:
+        pet_expected = snapshot.get("expected_pet_params_total", 0) or 0
+        pet_found = snapshot.get("found_pet_params", 0) or 0
+        return f"msgs_last_10s={messages}; pet_params={pet_found}/{pet_expected}"
 
 
 def format_pishock_status(status: dict | None, running: bool) -> str:
@@ -39,13 +41,11 @@ def format_pishock_status(status: dict | None, running: bool) -> str:
     return "Not configured"
 
 
-def _osc_colour(role: str, running: bool, snapshot: dict | None) -> str:
+def _osc_colour(running: bool, snapshot: dict | None) -> str:
     if not running:
         return "grey"
     if snapshot is None:
         return "orange"
-    if role == "trainer" or not snapshot.get("enabled", False):
-        return "grey"
 
     messages = snapshot.get("messages_last_10s", 0)
     pet_expected = snapshot.get("expected_pet_params_total", 0) or 0
@@ -130,7 +130,7 @@ class ConnectionStatusPanel(ttk.LabelFrame):
         whisper_status = services.get_whisper_backend() if running else "Stopped"
 
         osc_text = format_osc_status(role or "", osc_status) if running else ("Stopped" if role else "Role not set")
-        self.osc_indicator.set_status(osc_text, _osc_colour(role or "", running, osc_status))
+        self.osc_indicator.set_status(osc_text, _osc_colour(running, osc_status))
 
         pishock_text = format_pishock_status(pishock_status, running)
         self.pishock_indicator.set_status(pishock_text, _pishock_colour(pishock_text))

@@ -166,10 +166,6 @@ class WhisperInterface:
             # using an unbounded queue.
             self._audio_queue = queue.Queue()
 
-    @property
-    def is_running(self) -> bool:
-        return self._running
-
     def get_backend_summary(self) -> str:
         """Return a human-friendly summary of the active backend.
 
