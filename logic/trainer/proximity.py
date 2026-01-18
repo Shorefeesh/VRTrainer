@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 
-from logic.feature import TrainerCommandFeature
+from logic.trainer.feature import TrainerCommandFeature
 
 
 class TrainerProximityFeature(TrainerCommandFeature):

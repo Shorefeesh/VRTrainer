@@ -4,7 +4,7 @@ from tkinter import ttk, font
 from config import load_config, save_config
 from interfaces.audio_devices import list_input_devices
 from logic import services
-from logic.trainer import profile as trainer_profile
+from logic import profile as trainer_profile
 
 from .logs import EventLogPanel, WhisperLogPanel
 from .trainer import TrainerTab

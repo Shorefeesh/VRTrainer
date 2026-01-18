@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from typing import Dict, List
 
-from logic.feature import PetFeature
+from logic.pet.feature import PetFeature
 
 
 class FocusFeature(PetFeature):
@@ -20,13 +20,11 @@ class FocusFeature(PetFeature):
     ) -> None:
         super().__init__(**kwargs)
 
-        self._poll_interval: float = 0.1
         self._fill_rate: float = 0.2
         self._drain_rate: float = 0.02
-        self._shock_threshold: float = 0.2
+        self._focus_shock_threshold: float = 0.2
         self._name_penalty: float = 0.15
         self._focus_meter: float = 1.0
-        self._last_sample_log: float = 0
         self._last_tick: float = 0
 
     def start(self) -> None:
@@ -56,11 +54,10 @@ class FocusFeature(PetFeature):
             self._update_meter(dt)
             self._last_tick = now
 
-            if self._should_shock(now):
-                self._deliver_correction(config)
-                self._cooldown_until = now + self._scaled_cooldown(config)
+            if self._should_shock():
+                self._deliver_shock_range(config=config, reason="focus_low", value=self._focus_meter, threshold=self._focus_shock_threshold, inverse=True)
 
-            self._log_sample(now)
+            self._log_sample({"meter": self._focus_meter, "threshold": self._focus_shock_threshold})
 
             if self._stop_event.wait(self._poll_interval):
                 break
@@ -80,43 +77,5 @@ class FocusFeature(PetFeature):
     def _apply_penalties(self, events: List[dict]) -> None:
         self._focus_meter = max(0.0, self._focus_meter - (len(events) if events else 0) * self._name_penalty)
 
-    def _should_shock(self, now: float) -> bool:
-        if now < self._cooldown_until:
-            return False
-        return self._focus_meter <= self._shock_threshold
-
-    def _deliver_correction(self, config: dict) -> None:
-        shock_min, shock_max, shock_duration = self._shock_params_range(config)
-        deficit = (self._shock_threshold - self._focus_meter) / self._shock_threshold
-        strength = max(shock_min, min(shock_max, int(deficit * shock_max)))
-        self.pishock.send_shock(strength=strength, duration=shock_duration)
-        self._log(
-            f"shock meter={self._focus_meter:.3f} threshold={self._shock_threshold:.3f} strength={strength}"
-        )
-        # Rework per-trainer logs
-        # self._send_logs(
-        #     {
-        #         "event": "shock",
-        #         "meter": self._focus_meter,
-        #         "threshold": self._shock_threshold,
-        #         "strength": strength,
-        #     },
-        # )
-
-    def _log_sample(self, now: float) -> None:
-        if now - self._last_sample_log < 1.0:
-            return
-
-        self._last_sample_log = now
-        self._log(
-            f"sample meter={self._focus_meter:.3f} threshold={self._shock_threshold:.3f}"
-        )
-        # Rework per-trainer logs
-        # self._send_logs(
-        #     {
-        #         "event": "sample",
-        #         "meter": self._focus_meter,
-        #         "threshold": self._shock_threshold,
-        #     },
-        #     target_clients=[trainer_id],
-        # )
+    def _should_shock(self) -> bool:
+        return self._focus_meter <= self._focus_shock_threshold

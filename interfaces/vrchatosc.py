@@ -37,6 +37,8 @@ class VRChatOSCInterface:
         self._message_times = deque()
         self._trainer_params_seen: set[str] = set()
         self._expected_trainer_params:  set[str] = {
+            "Trainer/Menu/Shock",
+            "Trainer/Menu/Vibrate",
         }
         self._expected_pet_params: set[str] = {
             "Trainer/Proximity",
@@ -65,6 +67,9 @@ class VRChatOSCInterface:
             "RightEar_Stretch",
             "Tail_IsGrabbed",
             "Tail_Stretch",
+            "OGB/Orf/Pussy/PenOthers",
+            "OGB/Orf/Ass/PenOthers",
+            "OGB/Orf/Mouth/PenOthers",
         }
         self._param_values: dict[str, object] = {}
 

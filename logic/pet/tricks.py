@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Dict, List
 
-from logic.feature import PetFeature
+from logic.pet.feature import PetFeature
 
 
 class TricksFeature(PetFeature):
@@ -55,14 +55,12 @@ class TricksFeature(PetFeature):
                 if self._active_command is not None:
                     if self._is_command_completed():
                         self._log(
-                            f"command_success trainer={trainer_id[:8]} trick={self._active_command} remaining={self._command_until - now}"
+                            f"command_success trainer={trainer_id[:8]} trick={self._active_command} remaining={self._delay_until - now}"
                         )
                         self._deliver_completion_signal()
                         self._active_command = None
-                    elif now >= self._command_until and now >= self._cooldown_until:
-                        self._deliver_failure(trainer_id, config)
-                        self._cooldown_until = now + self._scaled_cooldown(config)
-                        self._active_command = None
+                    elif now >= self._delay_until:
+                        self._deliver_shock_single(config=config, reason=self._active_command, trainer_id=trainer_id)
 
             if self._stop_event.wait(self._poll_interval):
                 break
@@ -89,7 +87,7 @@ class TricksFeature(PetFeature):
         normalised = self.normalise_text(str(command))
 
         self._active_command = normalised,
-        self._command_until = now + self._scaled_delay(config)
+        self._delay_until = now + self._scaled_delay(config)
         self._log(f"command_start trainer={trainer_id[:8]} trick={normalised}")
         self._deliver_task_start_signal()
 
@@ -146,13 +144,6 @@ class TricksFeature(PetFeature):
                    and self.osc.get_bool_param("Trainer/HeadFloorMax", default=False)
 
         return False
-
-    def _deliver_failure(self, trainer_id: str, config: dict) -> None:
-        strength, duration = self._shock_params_single(config)
-        self.pishock.send_shock(strength=strength, duration=duration)
-        self._log(
-            f"task_fail_shock trainer={trainer_id[:8]} trick={self._active_command} strength={strength}"
-        )
 
     def _deliver_task_start_signal(self) -> None:
         self.pishock.send_vibrate(strength=10, duration=0.2)

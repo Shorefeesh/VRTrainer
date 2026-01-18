@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Dict, List
 
-from logic.feature import PetFeature
+from logic.pet.feature import PetFeature
 
 
 class ScoldingFeature(PetFeature):
@@ -33,15 +33,12 @@ class ScoldingFeature(PetFeature):
             active_configs = self._active_trainer_configs()
 
             events_by_trainer = self._collect_scold_events()
-            now = time.time()
 
             for trainer_id, config in active_configs.items():
                 if events_by_trainer.get(trainer_id):
-                    if now >= self._cooldown_until:
-                        self._deliver_scolding_shock(trainer_id, config)
-                        self._cooldown_until = now + self._scaled_cooldown(config)
+                    self._deliver_shock_single(config=config, reason="scold", trainer_id=trainer_id)
 
-            if self._stop_event.wait(0.5):
+            if self._stop_event.wait(self._poll_interval):
                 break
 
     def _collect_scold_events(self) -> Dict[str, List[dict]]:
@@ -56,11 +53,3 @@ class ScoldingFeature(PetFeature):
             if trainer_id:
                 grouped.setdefault(trainer_id, []).append(event)
         return grouped
-
-    def _deliver_scolding_shock(self, trainer_id: str, config: dict) -> None:
-        try:
-            strength, duration = self._shock_params_single(config)
-            self.pishock.send_shock(strength=strength, duration=duration)
-            self._log(f"shock trainer={trainer_id[:8]} strength={strength}")
-        except Exception:
-            return

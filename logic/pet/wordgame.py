@@ -3,7 +3,7 @@ from __future__ import annotations
 import time
 from typing import Callable, Dict, Set
 
-from logic.feature import PetFeature
+from logic.pet.feature import PetFeature
 
 
 class WordFeature(PetFeature):
@@ -63,22 +63,10 @@ class WordFeature(PetFeature):
                     handler = handlers[next(iter(handlers.keys()))]
 
                 if handler is not None:
-                    handler(config, text)
+                    handler(config, trainer_id, text)
 
             if self._stop_event.wait(self._poll_interval):
                 break
-
-    def _maybe_deliver_correction(self, config: dict, triggered: bool, game: str) -> None:
-        """Apply cooldown logic and trigger a correction when needed."""
-        if not triggered:
-            return
-
-        now = time.time()
-        if now < self._cooldown_until:
-            return
-
-        self._deliver_correction(config, game=game)
-        self._cooldown_until = now + self._scaled_cooldown(config)
 
     @staticmethod
     def _tokenise_text(text: str) -> list[str]:
@@ -94,30 +82,30 @@ class WordFeature(PetFeature):
                 tokens.append(cleaned)
         return tokens
 
-    def _process_pronouns_text(self, config: dict, text: str) -> None:
+    def _process_pronouns_text(self, config: dict, trainer_id: str, text: str) -> None:
         """Handler for the Pronouns word game."""
-        triggered = self._contains_disallowed_pronouns(text)
-        self._maybe_deliver_correction(config, triggered, game="pronouns")
+        if self._contains_disallowed_pronouns(text):
+            self._deliver_shock_single(config=config, reason="pronouns", trainer_id=trainer_id)
 
-    def _process_letter_e_text(self, config: dict, text: str) -> None:
+    def _process_letter_e_text(self, config: dict, trainer_id: str, text: str) -> None:
         """Handler for the Letter E word game."""
-        triggered = self._contains_letter_e(text)
-        self._maybe_deliver_correction(config, triggered, game="letter_e")
+        if self._contains_letter_e(text):
+            self._deliver_shock_single(config=config, reason="letter_e", trainer_id=trainer_id)
 
-    def _process_contractions_text(self, config: dict, text: str) -> None:
+    def _process_contractions_text(self, config: dict, trainer_id: str, text: str) -> None:
         """Handler for the Contractions word game."""
-        triggered = self._contains_contraction(text)
-        self._maybe_deliver_correction(config, triggered, game="contractions")
+        if self._contains_contraction(text):
+            self._deliver_shock_single(config=config, reason="contractions", trainer_id=trainer_id)
 
-    def _process_swear_words_text(self, config: dict, text: str) -> None:
+    def _process_swear_words_text(self, config: dict, trainer_id: str, text: str) -> None:
         """Handler for the Swear Words word game."""
-        triggered = self._contains_swear_words(text)
-        self._maybe_deliver_correction(config, triggered, game="swear_words")
+        if self._contains_swear_words(text):
+            self._deliver_shock_single(config=config, reason="swear_words", trainer_id=trainer_id)
 
-    def _process_negativity_text(self, config: dict, text: str) -> None:
+    def _process_negativity_text(self, config: dict, trainer_id: str, text: str) -> None:
         """Handler for the Negativity word game."""
-        triggered = self._contains_negativity(text)
-        self._maybe_deliver_correction(config, triggered, game="negativity")
+        if self._contains_negativity(text):
+            self._deliver_shock_single(config=config, reason="negativity", trainer_id=trainer_id)
 
     def _contains_disallowed_pronouns(self, text: str) -> bool:
         """Return True if the text includes first-person pronouns."""

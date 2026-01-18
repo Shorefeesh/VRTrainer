@@ -4,7 +4,7 @@ import time
 from dataclasses import dataclass
 from typing import List
 
-from logic.feature import PetFeature
+from logic.pet.feature import PetFeature
 
 
 @dataclass
@@ -46,8 +46,6 @@ class ForbiddenWordsFeature(PetFeature):
                     break
                 continue
 
-            now = time.time()
-
             active_configs = self._active_trainer_configs()
 
             for trainer_id, config in active_configs.items():
@@ -56,26 +54,17 @@ class ForbiddenWordsFeature(PetFeature):
                 if not phrases:
                     continue
 
-                if now < self._cooldown_until:
-                    continue
+                match = self._match_forbidden(normalised_text, phrases)
 
-                if self._contains_forbidden(normalised_text, phrases):
-                    self._deliver_correction(trainer_id, config)
-                    self._cooldown_until = now + self._scaled_cooldown(config)
+                if match:
+                    self._deliver_shock_single(config=config, reason=match, trainer_id=trainer_id)
                     break
 
             if self._stop_event.wait(self._poll_interval):
                 break
 
-    def _contains_forbidden(self, normalised_text: str, phrases: List[str]) -> bool:
+    def _match_forbidden(self, normalised_text: str, phrases: List[str]) -> str | None:
         for phrase in phrases:
-            if phrase and phrase in normalised_text:
-                return True
-        return False
-
-    def _deliver_correction(self, trainer_id: str, config: dict) -> None:
-        strength, duration = self._shock_params_single(config)
-        self.pishock.send_shock(strength=strength, duration=duration)
-        self._log(
-            f"shock trainer={trainer_id[:8]} strength={strength}"
-        )
+            if phrase in normalised_text:
+                return phrase
+        return None

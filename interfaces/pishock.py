@@ -1,8 +1,11 @@
 from __future__ import annotations
 
-from typing import Optional
+from typing import Optional, TYPE_CHECKING
 import pishock
 import logging
+
+if TYPE_CHECKING:
+    from interfaces.vrchatosc import VRChatOSCInterface
 
 
 class PiShockInterface:
@@ -13,18 +16,26 @@ class PiShockInterface:
     helper used by trainer/pet features.
     """
 
-    def __init__(self, username: str, api_key: str, share_code: str, role: str = "trainer") -> None:
+    def __init__(
+        self,
+        username: str,
+        api_key: str,
+        share_code: str,
+        role: str = "trainer",
+        osc: "VRChatOSCInterface" = None,
+    ) -> None:
         """Create a new PiShock interface.
 
         Args:
             username: PiShock account username.
             api_key: PiShock API key.
-            role: Which runtime is using this interface, ``\"trainer\"``
-                or ``\"pet\"``.
+            role: Which runtime is using this interface, ``\"trainer\"`` or ``\"pet\"``.
+            osc: VRChat OSC interface for mirroring shocks to avatar parameters.
         """
         self.username: Optional[str] = username
         self.api_key: Optional[str] = api_key
         self.share_code: Optional[str] = share_code
+        self._osc: Optional["VRChatOSCInterface"] = osc
 
         self.logger = logging.getLogger(__name__)
 
@@ -108,16 +119,43 @@ class PiShockInterface:
             self.logger.info("PiShock not enabled")
             return
 
-        # Normalise inputs to avoid type errors in the PiShock library
-        # (e.g. floats from features like the Pronouns word game).
-        safe_strength = int(round(float(strength)))
-        safe_strength = max(0, min(100, safe_strength))
-        safe_duration = max(0.0, float(duration))
+        if not self._connected:
+            self.logger.info("PiShock not connected")
+            return
 
-        # Always emit an OSC parameter so the avatars can react visually
-        # to shocks, even if the PiShock API itself is not configured
-        # or connected.
-        self._send_shock_osc(strength=safe_strength, duration=safe_duration)
+        shocker = self._shocker
+        if shocker is None:
+            self.logger.info("PiShock no shocker")
+            return
+
+        safe_strength = max(0, min(100, int(strength)))
+        safe_duration = max(0.0,  min(15.0, float(duration)))
+
+        self._send_shock_osc(strength=safe_strength, duration=1)
+
+        try:
+            shocker.shock(duration=safe_duration, intensity=safe_strength)
+            self.logger.info("PiShock sending shock done")
+        except Exception as exc:
+            self.logger.info(f"PiShock sending shock failed: {exc}")
+
+    def send_vibrate(
+        self,
+        strength: int,
+        duration: float,
+    ) -> None:
+        """Send a vibration with the given strength and duration.
+
+        Args:
+            strength: Vibration intensity (0-100).
+            duration: Vibration duration in seconds. Can be a float in the
+                0-1 range or an integer 0–15 for whole seconds.
+        """
+        self.logger.info("PiShock sending vibration start")
+
+        if not self._enabled:
+            self.logger.info("PiShock not enabled")
+            return
 
         if not self._connected:
             self.logger.info("PiShock not connected")
@@ -128,90 +166,24 @@ class PiShockInterface:
             self.logger.info("PiShock no shocker")
             return
 
-        self.logger.info("PiShock sending shock start2")
+        safe_strength = max(0, min(100, int(strength)))
+        safe_duration = max(0.0,  min(15.0, float(duration)))
 
         try:
-            shocker.shock(duration=safe_duration, intensity=safe_strength)
-            self.logger.info("PiShock sending shock done")
+            shocker.vibrate(duration=safe_duration, intensity=safe_strength)
+            self.logger.info("PiShock sending vibration done")
         except Exception as exc:
-            # Surface the error so users can see why the shock failed,
-            # but avoid crashing the caller.
-            self.logger.info(f"PiShock sending shock failed: {exc}")
-
-    def send_vibrate(
-        self,
-        strength: int,
-        duration: float,
-    ) -> None:
-        """Send a vibrate with the given strength and duration.
-
-        Args:
-            strength: Vibrate intensity (0-100).
-            duration: Vibrate duration in seconds. Can be a float in the
-                0-1 range or an integer 0–15 for whole seconds.
-        """
-        if not self._enabled:
-            return
-
-        if not self._connected:
-            return
-
-        shocker = self._shocker
-        if shocker is None:
-            return
-
-        shocker.vibrate(duration=duration, intensity=strength)
+            self.logger.info(f"PiShock sending vibration failed: {exc}")
 
     # Internal helpers -------------------------------------------------
     def _send_shock_osc(self, strength: int, duration: float) -> None:
-        """Send OSC parameters for the given shock based on runtime role.
-
-        The parameters are sent as floats whose value matches the shock
-        strength (normalised to 0–1) so avatar logic can drive effects
-        based on intensity.
-
-        This helper is intentionally independent from PiShock connection
-        status so that the OSC signal is still emitted when credentials
-        are missing or invalid.
-        """
-        try:
-            from pythonosc.udp_client import SimpleUDPClient
-        except Exception:
-            # If python-osc is not available, silently skip OSC output.
-            return
-
-        import threading
-        import time
-
-        # Clamp duration to a sensible non-negative value.
-        safe_duration = max(float(duration), 0.0)
+        """Send OSC parameters for the given shock """
         # Normalise strength (0–100) to a 0–1 float for OSC.
         value = max(0.0, min(1.0, float(strength) / 100.0))
 
-        addresses = ["/avatar/parameters/Trainer/BeingShocked"]
-        thread_name = "PetBeingShockedOSC"
-
-        def _worker() -> None:
-            try:
-                client = SimpleUDPClient("127.0.0.1", 9000)
-
-                # Set parameters to the shock strength.
-                for addr in addresses:
-                    client.send_message(addr, value)
-
-                if safe_duration > 0.0:
-                    time.sleep(safe_duration)
-
-                # Reset parameters back to zero.
-                for addr in addresses:
-                    client.send_message(addr, 0.0)
-            except Exception:
-                # Ignore any OSC errors so they never affect feature logic.
-                return
-
-        thread = threading.Thread(
-            target=_worker,
-            name=thread_name,
-            daemon=True,
+        self._osc.pulse_parameter(
+            "Trainer/BeingShocked",
+            value_on=value,
+            value_off=0.0,
+            duration=duration,
         )
-        thread.start()

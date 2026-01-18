@@ -2,23 +2,13 @@ from __future__ import annotations
 
 import threading
 from dataclasses import dataclass
-from typing import Any, Callable, Dict, List, Optional, Type
+from typing import Any, Callable, Dict, List, Optional, Type, TYPE_CHECKING
 
 from logic.logging_utils import SessionLogManager
 
-
-@dataclass
-class FeatureContext:
-    """Shared interfaces/config passed to feature constructors."""
-
-    role: str
-    osc: Any = None
-    pishock: Any = None
-    whisper: Any = None
-    server: Any = None
-    log_manager: SessionLogManager | None = None
-    config_provider: Callable[[], Dict[str, dict]] | None = None
-
+if TYPE_CHECKING:
+    from logic.pet.feature import PetFeature
+    from logic.trainer.feature import TrainerFeature
 
 class Feature:
     """Base feature with common interface wiring and logging."""
@@ -63,9 +53,9 @@ class Feature:
         self._thread: threading.Thread | None = None
         self._stop_event = threading.Event()
 
-        self._poll_interval: float = 0.2
+        self._poll_interval: float = 0.1
         self._cooldown_until: float = 0.0
-        self._command_until: float = 0.0
+        self._delay_until: float = 0.0
         self._base_cooldown_seconds: float = 2.0
         self._base_delay_seconds: float = 4.0
         self._base_shock_duration: float = 0.2
@@ -247,120 +237,17 @@ class Feature:
         self.server.send_logs(stats, target_clients=target_clients, broadcast_trainers=broadcast_trainers)
 
 
-class TrainerFeature(Feature):
-    """Base class for trainer-side features."""
+@dataclass
+class FeatureContext:
+    """Shared interfaces/config passed to feature constructors."""
 
-    role = "trainer"
-
-    def _pulse_command_flag(self, flag_name: str) -> None:
-        osc = self.osc
-        if osc is None:
-            return
-
-        try:
-            osc.pulse_parameter(flag_name, value_on=1, value_off=0, duration=0.2)
-        except Exception:
-            return
-
-    def _has_active_pet(self) -> bool:
-        configs = self._latest_trainer_settings()
-        if not configs:
-            return False
-
-        flag = self.feature_name
-        if not flag:
-            return True
-
-        return any(bool(cfg.get(self.feature_name or flag)) for cfg in configs.values())
-
-
-class TrainerCommandFeature(TrainerFeature):
-    """Base class for trainer-side features which triggers an event on specific command words."""
-
-    def __init__(
-        self,
-        **kwargs,
-    ) -> None:
-        super().__init__(**kwargs)
-        self._require_name: bool = False
-        self._require_scold: bool = False
-        self._send_default: bool = False
-        self._command_phrases: dict[str, list[str]] = {}
-
-    # Internal helpers -------------------------------------------------
-    def _worker_loop(self) -> None:
-        while not self._stop_event.is_set():
-            if not self._has_active_pet():
-                self.whisper.reset_tag(self.feature_name)
-                if self._stop_event.wait(self._poll_interval):
-                    break
-                continue
-
-            text = self.whisper.get_new_text(self.feature_name)
-
-            pet_configs = self._config_map()
-            if pet_configs and text:
-                for pet_id, cfg in pet_configs.items():
-                    if not cfg.get(self.feature_name):
-                        continue
-
-                    detected = self._detect_command(text, cfg)
-                    if detected is None:
-                        continue
-
-                    meta = {"feature": self.feature_name, "target_client": str(pet_id)}
-                    self.server.send_command(detected, meta)
-                    self._log(
-                        f"command pet={str(pet_id)[:8]} name={detected}"
-                    )
-
-                    self._pulse_command_flag("Trainer/Command")
-
-            if self._stop_event.wait(self._poll_interval):
-                break
-
-    def _detect_command(self, text: str, cfg: dict) -> str | None:
-        if not text:
-            return None
-
-        normalised = self.normalise_text(text)
-        if not normalised:
-            return None
-
-        if self._require_name:
-            names = self._extract_word_list(cfg, "names")
-            recent_chunks = self.whisper.get_recent_text_chunks(count=3)
-            recent_normalised = " ".join(self.normalise_list(recent_chunks))
-            if not any(name in recent_normalised for name in names):
-                return None
-
-        if self._require_scold:
-            scolds = self._extract_word_list(cfg, "scolding_words")
-            if not any(scold in normalised for scold in scolds):
-                return None
-
-        for cmd, phrases in self._command_phrases.items():
-            for phrase in phrases:
-                if phrase and phrase in normalised:
-                    return cmd
-
-        if self._send_default:
-            return self.feature_name
-
-        return None
-
-
-class PetFeature(Feature):
-    """Base class for pet-side features."""
-
-    role = "pet"
-
-    def _active_trainer_configs(self) -> Dict[str, dict]:
-        configs = self._latest_trainer_settings()
-        return {tid: cfg for tid, cfg in configs.items() if cfg.get(self.feature_name)}
-
-    def _has_active_trainer(self) -> bool:
-        return bool(self._active_trainer_configs())
+    role: str
+    osc: Any = None
+    pishock: Any = None
+    whisper: Any = None
+    server: Any = None
+    log_manager: SessionLogManager | None = None
+    config_provider: Callable[[], Dict[str, dict]] | None = None
 
 
 FeatureKwargsBuilder = Callable[[str, FeatureContext], Dict[str, Any]]
