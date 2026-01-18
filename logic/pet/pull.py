@@ -44,7 +44,7 @@ class PullFeature(PetFeature):
 
             if now >= self._cooldown_until:
                 if self._check_and_maybe_shock(now, config):
-                    self._cooldown_until = now + self._scaled_cooldown()
+                    self._cooldown_until = now + self._scaled_cooldown(config)
 
             if self._stop_event.wait(self._poll_interval):
                 break
@@ -69,5 +69,5 @@ class PullFeature(PetFeature):
 
         self.pishock.send_shock(strength=strength, duration=shock_duration)
         self._log(
-            f"event=shock feature=pull target={target} stretch={stretch:.2f} threshold={self._stretch_threshold:.2f} strength={strength:.1f}"
+            f"shock target={target} stretch={stretch:.2f} threshold={self._stretch_threshold:.2f} strength={strength:.1f}"
         )

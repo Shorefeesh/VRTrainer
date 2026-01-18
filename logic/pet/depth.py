@@ -55,7 +55,7 @@ class DepthFeature(PetFeature):
         for base in self._targets:
             depth = self.osc.get_bool_param(f"{base}")
 
-            if depth >= self._stretch_threshold:
+            if depth >= self._depth_threshold:
                 self._deliver_correction(base, depth, config)
                 return True
 
