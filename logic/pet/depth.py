@@ -44,7 +44,7 @@ class DepthFeature(PetFeature):
             config = list(self._active_trainer_configs().values())[0]
 
             for base in self._targets:
-                depth = self.osc.get_float_param(base)
+                depth = self.osc.get_float_param(base, 0)
 
                 if depth > 0:
                     self._log_sample({"orifice": base, "depth": depth})
