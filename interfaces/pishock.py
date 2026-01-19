@@ -63,36 +63,42 @@ class PiShockInterface:
             self.logger.info("PiShock not enabled")
             return
 
-        if not self.username or not self.api_key or not self.share_code:
-            # Treat missing credentials as "not connected" but do not fail hard.
-            self._connected = False
-            self._api = None
-            self._shocker = None
-            self.logger.info("PiShock no details")
-            return
+        try_online = True
 
         try:
+            if not self.shocker_id:
+                self.logger.info("PiShock no shocker ID")
+
             api = pishock.SerialAPI(port=None)
             self.logger.info(api.info())
-        except pishock.zap.serialapi.SerialAutodetectError:
-            api = pishock.PiShockAPI(username=self.username, api_key=self.api_key)
-            self._api_mode = "online"
 
-        # verify_credentials() returns False on authentication failure.
-        if self._api_mode == "web" and not api.verify_credentials():
-            self._connected = False
-            self._api = None
-            self._shocker = None
-            self.logger.info("PiShock verify fail")
-            return
+            self._shocker = api.shocker(self.shocker_id)
+
+            try_online = False
+        except pishock.zap.serialapi.SerialAutodetectError:
+            self.logger.info("No serial connection")
+
+        if try_online:
+            if not self.username or not self.api_key or not self.share_code:
+                self._connected = False
+                self._api = None
+                self._shocker = None
+                self.logger.info("PiShock no login details")
+                return
+
+            api = pishock.PiShockAPI(username=self.username, api_key=self.api_key)
+
+            if not api.verify_credentials():
+                self._connected = False
+                self._api = None
+                self._shocker = None
+                self.logger.info("PiShock verify fail")
+                return
+
+            self._shocker = api.shocker(self.share_code)
 
         self._api = api
         self._connected = True
-
-        if self._api_mode == "serial":
-            self._shocker = api.shocker(self.shocker_id)
-        else:
-            self._shocker = api.shocker(self.share_code)
 
         self._shocker.vibrate(duration=1, intensity=100)
 
