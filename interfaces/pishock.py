@@ -36,7 +36,7 @@ class PiShockInterface:
         self.username: Optional[str] = username
         self.api_key: Optional[str] = api_key
         self.share_code: Optional[str] = share_code
-        self.shocker_id: Optional[int] = int(shocker_id)
+        self.shocker_id: Optional[str] = shocker_id
         self._osc: Optional["VRChatOSCInterface"] = osc
 
         self.logger = logging.getLogger(__name__)
@@ -66,20 +66,20 @@ class PiShockInterface:
         try_online = True
 
         try:
-            if not self.shocker_id:
+            if self.shocker_id == "":
                 self.logger.info("PiShock no shocker ID")
 
             api = pishock.SerialAPI(port=None)
             self.logger.info(api.info())
 
-            self._shocker = api.shocker(self.shocker_id)
+            self._shocker = api.shocker(int(self.shocker_id))
 
             try_online = False
         except pishock.zap.serialapi.SerialAutodetectError:
             self.logger.info("No serial connection")
 
         if try_online:
-            if not self.username or not self.api_key or not self.share_code:
+            if self.username == "" or self.api_key == "" or self.share_code == "":
                 self._connected = False
                 self._api = None
                 self._shocker = None
