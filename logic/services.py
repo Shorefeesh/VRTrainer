@@ -339,6 +339,7 @@ def _build_interfaces(role: str, settings: dict, input_device: Optional[str]) ->
             username=settings.get("pishock_username") or "",
             api_key=settings.get("pishock_api_key") or "",
             share_code=settings.get("pishock_share_code") or "",
+            shocker_id=settings.get("pishock_shocker_id") or "",
             role=role,
             osc=osc,
         )

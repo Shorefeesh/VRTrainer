@@ -21,6 +21,7 @@ class PiShockInterface:
         username: str,
         api_key: str,
         share_code: str,
+        shocker_id: str,
         role: str = "trainer",
         osc: "VRChatOSCInterface" = None,
     ) -> None:
@@ -35,6 +36,7 @@ class PiShockInterface:
         self.username: Optional[str] = username
         self.api_key: Optional[str] = api_key
         self.share_code: Optional[str] = share_code
+        self.shocker_id: Optional[int] = int(shocker_id)
         self._osc: Optional["VRChatOSCInterface"] = osc
 
         self.logger = logging.getLogger(__name__)
@@ -47,8 +49,9 @@ class PiShockInterface:
         self._enabled: bool = self._role == "pet"
 
         self._connected: bool = False
-        self._api: Optional[pishock.PiShockAPI] = None
-        self._shocker: Optional[pishock.HTTPShocker] = None
+        self._api: Optional[pishock.PiShockAPI | pishock.SerialAPI] = None
+        self._shocker: Optional[pishock.HTTPShocker | pishock.SerialShocker] = None
+        self._api_mode: str = "serial"
 
     def start(self) -> None:
         """Initialise the PiShock API client and validate credentials."""
@@ -68,10 +71,15 @@ class PiShockInterface:
             self.logger.info("PiShock no details")
             return
 
-        api = pishock.PiShockAPI(username=self.username, api_key=self.api_key)
+        try:
+            api = pishock.SerialAPI(port=None)
+            self.logger.info(api.info())
+        except pishock.zap.serialapi.SerialAutodetectError:
+            api = pishock.PiShockAPI(username=self.username, api_key=self.api_key)
+            self._api_mode = "online"
 
         # verify_credentials() returns False on authentication failure.
-        if not api.verify_credentials():
+        if self._api_mode == "web" and not api.verify_credentials():
             self._connected = False
             self._api = None
             self._shocker = None
@@ -81,7 +89,10 @@ class PiShockInterface:
         self._api = api
         self._connected = True
 
-        self._shocker = api.shocker(self.share_code)
+        if self._api_mode == "serial":
+            self._shocker = api.shocker(self.shocker_id)
+        else:
+            self._shocker = api.shocker(self.share_code)
 
         self._shocker.vibrate(duration=1, intensity=100)
 

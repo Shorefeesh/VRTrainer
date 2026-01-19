@@ -26,7 +26,10 @@ def _create_pishock_credentials_frame(
     share_code = LabeledEntry(frame, "Share Code", show="*")
     share_code.grid(row=2, column=0, sticky="ew")
 
-    return frame, username, api_key, share_code
+    shocker_id = LabeledEntry(frame, "Shocker ID", show="*")
+    shocker_id.grid(row=3, column=0, sticky="ew")
+
+    return frame, username, api_key, share_code, shocker_id
 
 class PetTab(ScrollableFrame):
     """Pet tab UI."""
@@ -47,12 +50,13 @@ class PetTab(ScrollableFrame):
         self.input_device_row.grid(row=0, column=0, sticky="ew", padx=12, pady=(12, 6))
 
     def _build_pishock_section(self) -> None:
-        frame, self.pishock_username, self.pishock_api_key, self.pishock_share_code = _create_pishock_credentials_frame(self.container)
+        frame, self.pishock_username, self.pishock_api_key, self.pishock_share_code, self.pishock_shocker_id = _create_pishock_credentials_frame(self.container)
         frame.grid(row=1, column=0, sticky="nsew", padx=12, pady=(6, 12))
 
         self.pishock_username.variable.trace_add("write", self._on_any_setting_changed)
         self.pishock_api_key.variable.trace_add("write", self._on_any_setting_changed)
         self.pishock_share_code.variable.trace_add("write", self._on_any_setting_changed)
+        self.pishock_shocker_id.variable.trace_add("write", self._on_any_setting_changed)
 
     # Public helpers -----------------------------------------------------
     @property
@@ -70,6 +74,7 @@ class PetTab(ScrollableFrame):
             "pishock_username": self.pishock_username.variable.get(),
             "pishock_api_key": self.pishock_api_key.variable.get(),
             "pishock_share_code": self.pishock_share_code.variable.get(),
+            "pishock_shocker_id": self.pishock_shocker_id.variable.get(),
         }
 
     def apply_settings(self, settings: dict | None) -> None:
@@ -80,10 +85,12 @@ class PetTab(ScrollableFrame):
                 self.pishock_username.variable.set("")
                 self.pishock_api_key.variable.set("")
                 self.pishock_share_code.variable.set("")
+                self.pishock_shocker_id.variable.set("")
             else:
                 self.pishock_username.variable.set(settings.get("pishock_username", ""))
                 self.pishock_api_key.variable.set(settings.get("pishock_api_key", ""))
                 self.pishock_share_code.variable.set(settings.get("pishock_share_code", ""))
+                self.pishock_shocker_id.variable.set(settings.get("pishock_shocker_id", ""))
         finally:
             self._suppress_callbacks = False
 
