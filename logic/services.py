@@ -333,7 +333,7 @@ def _build_interfaces(role: str, settings: dict, input_device: Optional[str]) ->
     )
 
     if role == "trainer":
-        pishock = PiShockInterface(username="", api_key="", share_code="", role=role, osc=osc)
+        pishock = PiShockInterface(username="", api_key="", share_code="", shocker_id="", role=role, osc=osc)
     else:
         pishock = PiShockInterface(
             username=settings.get("pishock_username") or "",
