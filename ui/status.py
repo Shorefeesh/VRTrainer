@@ -13,6 +13,14 @@ def format_osc_status(role: str, snapshot: dict | None) -> str:
     if snapshot is None:
         return "No data"
 
+    listen_error = snapshot.get("listen_error")
+    if listen_error:
+        lowered = str(listen_error).lower()
+        suffix = ""
+        if "10048" in lowered or "in use" in lowered or "already" in lowered:
+            suffix = " (port in use)"
+        return f"Listener failed{suffix}"
+
     messages = snapshot.get("messages_last_10s", 0)
 
     if role == "trainer" :
@@ -46,6 +54,9 @@ def _osc_colour(running: bool, snapshot: dict | None) -> str:
         return "grey"
     if snapshot is None:
         return "orange"
+
+    if snapshot.get("listen_error"):
+        return "red"
 
     messages = snapshot.get("messages_last_10s", 0)
     pet_expected = snapshot.get("expected_pet_params_total", 0) or 0

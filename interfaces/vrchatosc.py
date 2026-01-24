@@ -81,17 +81,28 @@ class VRChatOSCInterface:
 
         self._server = None
         self._thread = None
+        self._listen_error: str | None = None
 
     def start(self) -> None:
         """Start OSC handling and begin listening on localhost:9001."""
         if self._running:
             return
 
+        self._listen_error = None
+
         dispatcher = Dispatcher()
         dispatcher.map("/*", self._on_osc_message)
         dispatcher.set_default_handler(self._on_osc_message)
 
-        server = ThreadingOSCUDPServer((self._host, self._port), dispatcher)
+        try:
+            server = ThreadingOSCUDPServer((self._host, self._port), dispatcher)
+        except OSError as exc:
+            self._listen_error = (
+                f"OSC listener failed to bind {self._host}:{self._port} ({exc})."
+                " Another OSC app may already be using this port."
+            )
+            self._log_message(self._log_relevant_events, self._listen_error)
+            return
 
         self._server = server
         self._running = True
@@ -103,7 +114,7 @@ class VRChatOSCInterface:
         if self._role == "pet":
             self.send_parameter("Collar", True)
 
-        self._log_message(self._log_relevant_events, "OSC listener started on {self._host}:{self._port}")
+        self._log_message(self._log_relevant_events, f"OSC listener started on {self._host}:{self._port}")
 
     def stop(self) -> None:
         """Stop OSC handling."""
@@ -229,6 +240,7 @@ class VRChatOSCInterface:
             "expected_pet_params_total": len(expected_pet),
             "found_pet_params": found_pet,
             "missing_pet_params": missing_pet,
+            "listen_error": self._listen_error,
         }
 
     # Parameter access -------------------------------------------------
