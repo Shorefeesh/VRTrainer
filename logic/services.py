@@ -394,7 +394,9 @@ def start_runtime(role: str, trainer_settings: dict, input_device: Optional[str]
     if _runtime is not None:
         stop_runtime()
 
-    _runtime = _build_interfaces(role, trainer_settings, input_device)
+    runtime = _build_interfaces(role, trainer_settings, input_device)
+
+    _runtime = runtime
 
 
 def stop_runtime() -> None:

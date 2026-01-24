@@ -100,10 +100,16 @@ class VRChatOSCInterface:
         self._thread = thread
         thread.start()
 
+        if self._role == "pet":
+            self.send_parameter("Collar", True)
+
         self._log_message(self._log_relevant_events, "OSC listener started on {self._host}:{self._port}")
 
     def stop(self) -> None:
         """Stop OSC handling."""
+        if self._role == "pet":
+            self.send_parameter("Collar", False)
+
         self._running = False
         server = self._server
         self._server = None
