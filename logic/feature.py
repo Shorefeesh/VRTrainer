@@ -361,13 +361,13 @@ def feature_definitions() -> List[FeatureDefinition]:
             pet_cls=ProximityFeature,
             log_name="proximity_feature.log",
         ),
-        FeatureDefinition(
-            key="tricks",
-            label="Tricks",
-            trainer_cls=TrainerTricksFeature,
-            pet_cls=TricksFeature,
-            log_name="tricks_feature.log",
-        ),
+        # FeatureDefinition(
+        #     key="tricks",
+        #     label="Tricks",
+        #     trainer_cls=TrainerTricksFeature,
+        #     pet_cls=TricksFeature,
+        #     log_name="tricks_feature.log",
+        # ),
         FeatureDefinition(
             key="remote",
             label="Remote Control",
