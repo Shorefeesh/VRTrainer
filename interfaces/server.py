@@ -8,16 +8,8 @@ import logging
 import threading
 import json
 import queue
-
-try:
-    import requests
-except ImportError:  # pragma: no cover - optional runtime dep when remote server is used
-    requests = None  # type: ignore[assignment]
-
-try:
-    import websocket  # websocket-client
-except ImportError:  # pragma: no cover
-    websocket = None  # type: ignore[assignment]
+import requests
+import websocket
 
 
 class RemoteServerInterface:
@@ -37,11 +29,6 @@ class RemoteServerInterface:
         log: Callable[[str], None] | None = None,
         timeout: float = 6.0,
     ) -> None:
-        if requests is None:  # pragma: no cover - import guard
-            raise RuntimeError("requests is required for RemoteServerInterface (pip install requests)")
-        if websocket is None:  # pragma: no cover - import guard
-            raise RuntimeError("websocket-client is required (pip install websocket-client)")
-
         self.base_url = base_url.rstrip("/")
         self._role = "trainer" if role == "trainer" else "pet"
         self._username = username.strip() or "Anonymous"

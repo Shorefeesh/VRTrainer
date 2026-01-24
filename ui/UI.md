@@ -37,7 +37,6 @@ All items relevant to trainer role.
     [] `Focus`
     [] `Proximity`
     [] `Tricks`
-    [] `Tricks (SPS)`
     [] `Scolding Words`
     [] `Forbidden Words`
     [] `Word Game` {select}
@@ -61,8 +60,12 @@ All items relevant to pet role.
 `Input device:` {select}
 
 `PiShock Credentials`
-  `Username:` {text}
-  `API Key:` {text}
+  `Web`
+    `Username:` {text}
+    `API Key:` {text}
+    `Sharecode:` {text}
+  `Serial`
+    `Shocker ID:` {text}
 
 
 ## Session

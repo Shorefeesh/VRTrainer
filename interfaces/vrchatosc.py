@@ -4,8 +4,11 @@ from typing import Callable, Iterable
 
 from pythonosc.dispatcher import Dispatcher
 from pythonosc.osc_server import ThreadingOSCUDPServer
+from pythonosc.udp_client import SimpleUDPClient
 
+from collections import deque
 import threading
+import time
 
 
 class VRChatOSCInterface:
@@ -23,8 +26,6 @@ class VRChatOSCInterface:
         *,
         role: str = "pet",
     ) -> None:
-        from collections import deque
-        import threading
 
         self._running = False
         self._host = "127.0.0.1"
@@ -90,11 +91,7 @@ class VRChatOSCInterface:
         dispatcher.map("/*", self._on_osc_message)
         dispatcher.set_default_handler(self._on_osc_message)
 
-        try:
-            server = ThreadingOSCUDPServer((self._host, self._port), dispatcher)
-        except OSError:
-            self._running = False
-            return
+        server = ThreadingOSCUDPServer((self._host, self._port), dispatcher)
 
         self._server = server
         self._running = True
@@ -122,12 +119,7 @@ class VRChatOSCInterface:
         if self._tx_client is not None:
             return self._tx_client
 
-        try:
-            from pythonosc.udp_client import SimpleUDPClient
-
-            self._tx_client = SimpleUDPClient(self._host, self._tx_port)
-        except Exception:
-            self._tx_client = None
+        self._tx_client = SimpleUDPClient(self._host, self._tx_port)
 
         return self._tx_client
 
@@ -144,12 +136,9 @@ class VRChatOSCInterface:
 
         address = f"/avatar/parameters/{name}"
 
-        try:
-            client.send_message(address, value)
-            self._log_message(self._log_relevant_events, f"OSC send {address} value={value}")
-            return True
-        except Exception:
-            return False
+        client.send_message(address, value)
+        self._log_message(self._log_relevant_events, f"OSC send {address} value={value}")
+        return True
 
     def pulse_parameter(
         self,
@@ -171,9 +160,6 @@ class VRChatOSCInterface:
 
         if duration <= 0:
             return
-
-        import threading
-        import time
 
         def _reset() -> None:
             time.sleep(duration)
@@ -209,8 +195,6 @@ class VRChatOSCInterface:
     # Public diagnostics -----------------------------------------------
     def get_status_snapshot(self) -> dict:
         """Return a snapshot of recent OSC message and parameter status."""
-        import time
-
         now = time.time()
         cutoff = now - 10.0
 
@@ -300,11 +284,8 @@ class VRChatOSCInterface:
         return f"{address} -> {value_repr}"
 
     def _log_message(self, logger: Callable[[str], None] | None, message: str) -> None:
-        try:
-            if logger is not None:
-                logger(message)
-        except Exception:
-            return
+        if logger is not None:
+            logger(message)
 
     def _log_osc_message(self, address: str, values: Iterable[object], is_relevant: bool) -> None:
         if is_relevant:

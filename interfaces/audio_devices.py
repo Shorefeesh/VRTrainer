@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from typing import List
+import sounddevice as sd
 
 
 def list_input_devices() -> List[str]:
@@ -11,15 +12,7 @@ def list_input_devices() -> List[str]:
     an empty list is returned so the rest of the application can
     continue to function.
     """
-    try:  # Import is optional so the rest of the app does not depend on it.
-        import sounddevice as sd  # type: ignore[import-not-found]
-    except Exception:  # pragma: no cover - environment / dependency specific
-        return []
-
-    try:
-        devices_info = sd.query_devices()
-    except Exception:  # pragma: no cover - environment / device specific
-        return []
+    devices_info = sd.query_devices()
 
     names: List[str] = []
     seen: set[str] = set()
