@@ -49,21 +49,6 @@ Pet:
 - Press `Start` or `Join`
 
 
-## Workflow
-`source venv/bin/activate` Activate venv
-
-
-## Index
-`avatar/` Parameter descriptions
-`interfaces/` Interface handlers
-`logic/` Feature implementations
-`ui/` UI code
-
-
-## Server
-Domain name: vrtrainer.online
-
-
 ## cuBLAS/cuDNN
 Download to run Whisper on GPU
 
